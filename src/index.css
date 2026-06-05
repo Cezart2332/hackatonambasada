@@ -1,0 +1,64 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 48 37% 96%;
+    --foreground: 143 20% 13%;
+    --card: 43 45% 98%;
+    --card-foreground: 143 20% 13%;
+    --popover: 43 45% 98%;
+    --popover-foreground: 143 20% 13%;
+    --primary: 84 31% 29%;
+    --primary-foreground: 47 68% 95%;
+    --secondary: 196 25% 90%;
+    --secondary-foreground: 150 17% 20%;
+    --muted: 43 31% 90%;
+    --muted-foreground: 140 8% 42%;
+    --accent: 41 86% 58%;
+    --accent-foreground: 143 20% 13%;
+    --destructive: 4 72% 48%;
+    --destructive-foreground: 48 37% 96%;
+    --border: 43 22% 82%;
+    --input: 43 22% 82%;
+    --ring: 84 31% 29%;
+    --radius: 0.9rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer utilities {
+  .chat-pattern {
+    background:
+      radial-gradient(circle at 12% 18%, rgba(230, 174, 55, 0.16), transparent 24%),
+      radial-gradient(circle at 88% 8%, rgba(117, 151, 159, 0.16), transparent 22%),
+      linear-gradient(120deg, rgba(251, 247, 238, 0.94), rgba(236, 241, 224, 0.94)),
+      repeating-linear-gradient(
+        45deg,
+        rgba(75, 94, 61, 0.035) 0,
+        rgba(75, 94, 61, 0.035) 1px,
+        transparent 1px,
+        transparent 18px
+      );
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

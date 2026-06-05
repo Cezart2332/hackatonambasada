@@ -1,0 +1,28 @@
+﻿# Dependencies & build (large, generated)
+node_modules/
+dist/
+dist-ssr/
+
+# Agent skills & tooling (not app source)
+.agents/
+skills-lock.json
+
+# TypeScript build cache
+*.tsbuildinfo
+
+# Logs & env
+*.log
+.env
+.env.*
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Vite / cache
+.vite/
+.cache/
+.eslintcache
+coverage/

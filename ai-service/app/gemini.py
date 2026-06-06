@@ -76,8 +76,6 @@ BLOCKED_SOURCE_DOMAINS = {
     "restaurantguru.com",
     "foursquare.com",
     "yelp.com",
-    "google.com",
-    "maps.google.com",
     "business.google.com",
     "tazz.ro",
     "glovoapp.com",
@@ -111,7 +109,7 @@ Return a JSON array. Each object MUST describe a currently active buyer venue in
   "type": "restaurant | hotel | pensiune | cafe | cofetarie | patiserie | bistro | catering | shop | deli | supermarket",
   "city": "orașul/localitatea exactă din adresă, ex: Constanța | Eforie Nord | Tulcea | Murfatlar",
   "address": "strada, număr, oraș, județ, Romania (adresă completă din Google Maps / site)",
-  "website": "https://... OFFICIAL venue website or official Facebook/Instagram page (required; no directories/news)",
+  "website": "https://... official venue website or official Facebook/Instagram page if found; empty string if unknown (no directories/news)",
   "phone": "+40... (ONLY if explicitly listed online — empty string otherwise)",
   "contactPerson": "role or name if found (empty otherwise)",
   "menuItems": "real dishes/products from menu or listing, comma-separated",
@@ -123,10 +121,10 @@ Return a JSON array. Each object MUST describe a currently active buyer venue in
 Rules:
 - Current date context is {CURRENT_YEAR}. ONLY include venues that appear active/open in {CURRENT_YEAR}.
 - ONLY include buyer venues: restaurants, hotels, pensiuni, cafés, bakeries/patisseries, bistros, catering/cantines, delis, grocery shops, supermarkets.
-- DO NOT include public markets/piețe, farmers markets, generic market halls, press articles, tourism guide entries, event pages, listings/directories, Google Maps-only results, or articles about places.
-- Every item MUST have an official venue URL in "website": own domain, official Facebook page, or official Instagram page. If you cannot find an official URL, omit the venue entirely.
-- source_urls MUST include the official venue URL and may include menu/contact pages from the same venue.
-- Directories/news/aggregators may only be used to discover a name; they are NOT acceptable as website/source evidence.
+- DO NOT include public markets/piețe, farmers markets, generic market halls, press articles, tourism guide entries, event pages, listings/directories, or articles about places. Google Maps may be used only to confirm a real venue address/place.
+- website is optional. If you cannot find an official venue website/Facebook/Instagram, use empty string and still include the venue if name/address are real.
+- source_urls are optional. Include only relevant links: official venue site/social page, menu/contact page, or Google Maps place link. Never include press articles, tourism guides, directories, aggregators, or generic search/list pages.
+- Directories/news/aggregators may only be used privately to discover a name; they are NOT acceptable as website/source_urls in the JSON.
 - ONLY include businesses that clearly exist in search results. Do NOT invent names.
 - Do NOT include latitude/longitude — we geocode from address.
 - phone must be copied exactly from a web source; if not found, use empty string. NEVER guess.
@@ -238,6 +236,27 @@ def _domain_blocked(url: str) -> bool:
     return any(host == domain or host.endswith(f".{domain}") for domain in BLOCKED_SOURCE_DOMAINS)
 
 
+def _looks_like_maps_url(url: str) -> bool:
+    host = _hostname(url)
+    if not host:
+        return False
+    if host == "maps.app.goo.gl":
+        return True
+    if host == "google.com" or host.endswith(".google.com"):
+        path = urlparse(url).path.lower()
+        return "/maps" in path or "/place" in path
+    return False
+
+
+def _looks_like_relevant_source_url(url: str) -> bool:
+    cleaned = _sanitize_url(url)
+    if not cleaned:
+        return False
+    if _looks_like_maps_url(cleaned):
+        return True
+    return _looks_like_official_venue_url(cleaned)
+
+
 def _looks_like_official_social(url: str) -> bool:
     host = _hostname(url)
     if not any(host == domain or host.endswith(f".{domain}") for domain in SOCIAL_OFFICIAL_DOMAINS):
@@ -254,9 +273,11 @@ def _looks_like_official_venue_url(url: str) -> bool:
     cleaned = _sanitize_url(url)
     if not cleaned or _domain_blocked(cleaned):
         return False
+    host = _hostname(cleaned)
+    if _looks_like_maps_url(cleaned) or host == "google.com" or host.endswith(".google.com"):
+        return False
     if _looks_like_official_social(cleaned):
         return True
-    host = _hostname(cleaned)
     if not host:
         return False
     return not any(part in host for part in ("news", "press", "blog", "guide", "tourism", "directory"))
@@ -390,14 +411,14 @@ def _parse_buyer_item(
         city = infer_city_from_address(address) or locality
 
     urls = [
-        str(u)
+        _sanitize_url(str(u))
         for u in item.get("source_urls", [])
-        if u and str(u).startswith("http") and not _domain_blocked(str(u))
+        if u and _looks_like_relevant_source_url(str(u))
     ]
     website = _sanitize_url(str(item.get("website", "") or "").strip())
     if website and not _looks_like_official_venue_url(website):
-        logger.warning("Skipping %s — website is not official venue URL: %s", name, website)
-        return None
+        logger.warning("Dropping non-official website for %s: %s", name, website)
+        website = ""
 
     menu_items = str(item.get("menuItems", item.get("menu_items", "")) or "").strip()
     phone = validate_phone(str(item.get("phone", "") or "").strip(), source_text=research_text)
@@ -406,11 +427,10 @@ def _parse_buyer_item(
 
     if not website:
         website = _guess_website_for_name(name, research_text, grounding_chunks or [])
-    if not website or not _looks_like_official_venue_url(website):
-        logger.warning("Skipping %s — missing official website/social page", name)
-        return None
+    if website and not _looks_like_official_venue_url(website):
+        website = ""
 
-    official_urls = [website]
+    official_urls = [website] if website else []
     merged_urls = list(dict.fromkeys(official_urls + urls))[:12]
     if not phone:
         idx = research_text.lower().find(name.lower())
@@ -418,11 +438,6 @@ def _parse_buyer_item(
             phone = _extract_phone_from_text(research_text[max(0, idx - 80) : idx + 220])
     if not menu_items:
         menu_items = _guess_menu_for_name(name, research_text)
-    if not merged_urls and website:
-        merged_urls = [website]
-    if not merged_urls:
-        merged_urls = [c["uri"] for c in (grounding_chunks or []) if c.get("uri")][:5]
-
     return BuyerDraft(
         name=name,
         type=business_type or "afacere locală",
@@ -449,8 +464,8 @@ def _enrich_buyer_details(draft: BuyerDraft, locality: str) -> None:
     prompt = (
         f"Caută pe internet afacerea „{draft.name}” din {locality}, România.\n"
         f"Context temporal: azi este {CURRENT_DATE_CONTEXT}; verifică doar informații actuale/active în {CURRENT_YEAR}.\n"
-        "Folosește web search și web fetch. Găsește: adresa completă, site/Facebook/Instagram OFICIAL, "
-        "telefon public (doar dacă e listat), meniu/produse. Nu folosi articole de presă sau directoare ca website.\n"
+        "Folosește web search, Google Maps și web fetch. Găsește: adresa completă, site/Facebook/Instagram OFICIAL dacă există, "
+        "telefon public (doar dacă e listat), meniu/produse. Linkurile sunt opționale. Nu folosi articole de presă sau directoare ca website/source_urls.\n"
         'Răspunde DOAR JSON: {"address":"","website":"","phone":"","contactPerson":"","menuItems":"","notes":""}\n'
         "Folosește string gol pentru câmpuri necunoscute. Nu inventa telefon sau adresă."
     )
@@ -504,9 +519,9 @@ def _enrich_buyer_details(draft: BuyerDraft, locality: str) -> None:
         extra_urls = [
             url
             for url in _filter_public_urls(_citation_urls(grounded) + _extract_urls_from_text(grounded_text))
-            if not _domain_blocked(url)
+            if _looks_like_relevant_source_url(url)
         ]
-        draft.source_urls = list(dict.fromkeys(draft.source_urls + extra_urls + _citation_urls(grounded)))[:12]
+        draft.source_urls = list(dict.fromkeys(draft.source_urls + extra_urls))[:12]
     except Exception as exc:
         logger.warning("Enrich failed for %s: %s", draft.name, exc)
 
@@ -527,8 +542,8 @@ def research_area(
         "Tipuri acceptate: restaurante, hoteluri, pensiuni, cafenele, cofetării/patiserii, bistrouri, catering/cantine, supermarketuri, magazine alimentare, băcănii.\n"
         "Exclude complet: piețe/târguri/hale, articole de presă, ghiduri turistice, directoare/listări, Google Maps-only, evenimente.\n"
         "Folosește web search și web fetch pentru site-uri oficiale, meniuri și pagini de contact.\n"
-        "Pentru fiecare venue: nume exact, oraș, adresă completă, site oficial, telefon public, meniu, nevoi agricole.\n"
-        "NU inventa afaceri și NU include venue-uri fără site/pagină oficială.\n\n"
+        "Pentru fiecare venue: nume exact, oraș, adresă completă, site oficial dacă există, telefon public, meniu, nevoi agricole.\n"
+        "Poți folosi Google Maps pentru adresă/validare. Linkurile sunt opționale; dacă le incluzi, pune doar linkuri relevante, nu articole de presă/directoare.\n\n"
         f"{JSON_SCHEMA_HINT}\n"
         f"Limitează la {settings.max_buyers_per_research} afaceri reale din zona {locality}.\n"
         f"Include doar afaceri din raza de ~{radius_km:.0f} km.\n"

@@ -14,7 +14,6 @@ from app.gemini import (
     _extract_json_array,
     _fetch_menu_from_website,
     _filter_public_urls,
-    _looks_like_official_venue_url,
     _parse_buyer_item,
     CURRENT_DATE_CONTEXT,
     CURRENT_YEAR,
@@ -153,16 +152,16 @@ def search_node(state: DiscoveryState) -> dict:
         f"Categoria acestei runde: {category['label']}.\n"
         f"Include doar: {category['accepted']}.\n"
         f"Exclude pentru această rundă: {category['rejected']}.\n"
-        f"Dovada minimă acceptată: {category['evidence']}.\n"
+        f"Dovada preferată: {category['evidence']}. Linkurile sunt opționale dacă adresa este clară și geocodabilă.\n"
         f"Producătorul vinde: {needs_label}.\n\n"
         f"NU include aceste afaceri deja găsite:\n{exclude_block}\n\n"
         f"EVITĂ tipuri/motive respinse anterior de producător:\n{avoid_block}\n\n"
         f"Include DOAR venue-uri cumpărătoare reale din categoria {category['label']}.\n"
-        "EXCLUDE complet piețe/târguri/hale publice, articole de presă, ghiduri turistice, directoare/listări, "
-        "Google Maps-only, pagini de eveniment sau mențiuni fără site oficial.\n"
+        "EXCLUDE complet piețe/târguri/hale publice, articole de presă, ghiduri turistice, directoare/listări ca linkuri finale, "
+        "pagini de eveniment sau mențiuni fără adresă reală. Poți folosi Google Maps pentru adresă/validare.\n"
         "Folosește web search și web fetch. Pentru fiecare: nume exact, oraș/localitate exactă, adresă completă, "
-        "site OFICIAL sau pagină oficială Facebook/Instagram, telefon public, meniu, nevoi agricole estimate.\n"
-        "Dacă nu găsești site/pagină oficială pentru venue, NU îl include.\n\n"
+        "site OFICIAL sau pagină oficială Facebook/Instagram dacă există, telefon public, meniu, nevoi agricole estimate.\n"
+        "Dacă nu găsești link oficial, lasă website/source_urls goale; nu pune articole de presă sau directoare în JSON.\n\n"
         f"{JSON_SCHEMA_HINT}\n"
         f"Returnează DOAR un JSON array valid cu până la {category_limit} afaceri noi din această categorie.\n"
         "NU inventa. NU include lat/lon."
@@ -205,9 +204,6 @@ def extract_validate_node(state: DiscoveryState) -> dict:
 
         if _address_needs_enrichment(draft.address, state["locality"]):
             _enrich_buyer_details(draft, state["locality"])
-        if not draft.website or not _looks_like_official_venue_url(draft.website):
-            logger.warning("Graph skip %s — missing official venue website", draft.name)
-            continue
 
         city = draft.city or infer_city_from_address(draft.address) or state["locality"]
         geo = geocode_business(

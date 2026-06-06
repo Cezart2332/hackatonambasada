@@ -32,8 +32,8 @@ export function AuthScreen({
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
-  const [loginEmail, setLoginEmail] = useState("ana@stupina-dobrogea.ro");
-  const [loginPassword, setLoginPassword] = useState("demo1234");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");
@@ -41,18 +41,10 @@ export function AuthScreen({
     producerName: "",
     businessName: "",
     phone: "",
-    products: [
-      createProduct({
-        name: "Miere de salcâm",
-        estimatedQuantity: "40",
-        unit: "kg",
-        pricePerKg: "34",
-        availableFrom: "Săptămâna asta",
-      }),
-    ],
+    products: [createProduct()],
     location: "",
-    range: "35 km",
-    days: "Vineri dimineața",
+    range: "",
+    days: "",
   });
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
@@ -107,24 +99,24 @@ export function AuthScreen({
     setAuthLoading(true);
     setAuthError(null);
 
-    const email = registerEmail.trim() || "producator@warmleads.ro";
+    const email = registerEmail.trim();
     const cleanProducts = registerSetup.products.map((product, index) => ({
       ...product,
-      name: product.name.trim() || (index === 0 ? "Miere de salcâm" : "Produs local"),
-      estimatedQuantity: product.estimatedQuantity.trim() || "40",
-      unit: product.unit.trim() || "kg",
-      pricePerKg: product.pricePerKg.trim() || "30",
-      availableFrom: product.availableFrom.trim() || registerSetup.days || "Săptămâna asta",
+      name: product.name.trim(),
+      estimatedQuantity: product.estimatedQuantity.trim(),
+      unit: product.unit.trim(),
+      pricePerKg: product.pricePerKg.trim(),
+      availableFrom: product.availableFrom.trim() || registerSetup.days,
     }));
 
     const setup: ProducerSetup = {
       ...registerSetup,
-      producerName: registerSetup.producerName.trim() || registerName.trim() || "Producător local",
-      businessName: registerSetup.businessName.trim() || "Gospodărie locală",
+      producerName: registerSetup.producerName.trim() || registerName.trim(),
+      businessName: registerSetup.businessName.trim(),
       products: cleanProducts,
-      location: registerSetup.location.trim() || "Murfatlar",
-      range: registerSetup.range.trim() || "35 km",
-      days: registerSetup.days.trim() || "Vineri dimineața",
+      location: registerSetup.location.trim(),
+      range: registerSetup.range.trim(),
+      days: registerSetup.days.trim(),
     };
 
     try {
@@ -208,55 +200,6 @@ export function AuthScreen({
                     <Button type="submit" variant="honey" className="w-full" disabled={authLoading}>
                       {authLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
                       {authLoading ? "Se conectează..." : "Intră în cont"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      disabled={authLoading}
-                      onClick={async () => {
-                        setAuthLoading(true);
-                        setAuthError(null);
-                        const email = "ana@stupina-dobrogea.ro";
-                        const password = "demo1234";
-                        setLoginEmail(email);
-                        setLoginPassword(password);
-                        try {
-                          await onLogin(email, password);
-                        } catch {
-                          try {
-                            await onRegister(email, password, {
-                              producerName: "Ana Popescu",
-                              businessName: "Stupina Dobrogea",
-                              phone: "",
-                              products: [
-                                createProduct({
-                                  name: "Miere de salcâm",
-                                  estimatedQuantity: "40",
-                                  unit: "kg",
-                                  pricePerKg: "34",
-                                }),
-                              ],
-                              location: "Murfatlar",
-                              locationChoice: {
-                                label: "Murfatlar, Constanța, România",
-                                lat: "44.1833",
-                                lon: "28.4167",
-                              },
-                              range: "35 km",
-                              days: "Marți și vineri dimineața",
-                            });
-                          } catch (error) {
-                            setAuthError(
-                              messageFromUnknownError(error, "Contul demo nu este disponibil momentan."),
-                            );
-                          }
-                        } finally {
-                          setAuthLoading(false);
-                        }
-                      }}
-                    >
-                      Folosește cont demo
                     </Button>
                   </form>
                 </TabsContent>

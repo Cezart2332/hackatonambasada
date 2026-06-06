@@ -12,7 +12,7 @@ export function createProduct(overrides: Partial<ProducerProduct> = {}): Produce
     estimatedQuantity: "",
     unit: "kg",
     pricePerKg: "",
-    availableFrom: "Săptămâna asta",
+    availableFrom: "",
     ...overrides,
   };
 }

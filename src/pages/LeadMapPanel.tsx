@@ -11,6 +11,8 @@ import {
   Wine,
   MessageCircle,
   AlertTriangle,
+  Search,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -86,9 +88,9 @@ export function MapLeadRow({
             </Badge>
           </div>
           
-          {lead.contactPerson || lead.phone ? (
+          {lead.phone ? (
             <p className="mt-1 text-[11px] text-[#6a7360]">
-              👤 {lead.contactPerson || "Persoană contact"} · 📞 {lead.phone || "Fără telefon"}
+              {lead.contactPerson ? `👤 ${lead.contactPerson} · ` : ""}📞 {lead.phone}
             </p>
           ) : null}
 
@@ -146,6 +148,8 @@ export function LeadMapPanel({
   statuses,
   failedFeedbacks = {},
   activeLeadCount,
+  searchingMore = false,
+  onSearchMore,
   onDetails,
   onMessage,
   onStatus,
@@ -156,6 +160,8 @@ export function LeadMapPanel({
   statuses: Record<string, LeadStatus>;
   failedFeedbacks?: Record<string, string>;
   activeLeadCount: number;
+  searchingMore?: boolean;
+  onSearchMore?: () => void;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
@@ -174,6 +180,23 @@ export function LeadMapPanel({
           </div>
           <Badge variant="warm">{activeLeadCount} active</Badge>
         </div>
+        {onSearchMore ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={searchingMore}
+            onClick={onSearchMore}
+            className="mt-3 w-full border-[#c8d9aa] bg-[#f0f5e8] text-[#3f532c] hover:bg-[#e3edd4]"
+          >
+            {searchingMore ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="h-4 w-4" />
+            )}
+            Caută alte lead-uri
+          </Button>
+        ) : null}
       </div>
 
       <div className="h-[280px] shrink-0 border-b border-[#d7ccb3] lg:h-[42%]">

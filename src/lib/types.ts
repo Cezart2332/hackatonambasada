@@ -60,6 +60,10 @@ export type Lead = {
   tone: string;
   icon: "restaurant" | "hotel" | "cafe" | "shop" | "deli";
   coordinates: [number, number];
+  needs?: string[];
+  matchedNeeds?: string[];
+  website?: string;
+  sourceUrls?: string[];
   phone?: string;
   contactPerson?: string;
   menuItems?: string;
@@ -86,3 +90,12 @@ export type ChatMessage =
 
 export type AppScreen = "auth" | "producer-onboarding" | "chat";
 export type DashboardView = "chat" | "map" | "profile";
+
+export type SimulatedCampaignStep = {
+  leadId: string;
+  leadName: string;
+  draftMessage: string;
+  simulatedOutcome: string;
+  simulatedAction: string;
+  reasoning: string;
+};

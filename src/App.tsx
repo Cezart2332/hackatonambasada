@@ -40,6 +40,8 @@ import {
   Wine,
   X,
   AlertTriangle,
+  Globe,
+  ExternalLink,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +59,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
-import { api, apiProfileToFrontend, setupToApiPayload, summarizeProducts } from "@/lib/api";
+import { api, apiProfileToFrontend, parseRangeKm, setupToApiPayload, summarizeProducts } from "@/lib/api";
 import { messageFromAuthError, messageFromUnknownError } from "@/lib/errors";
 import type {
   AppScreen,
@@ -71,6 +73,7 @@ import type {
   ProducerSetup,
   Profile,
   ProfileKey,
+  SimulatedCampaignStep,
 } from "@/lib/types";
 
 // Page and Component Imports
@@ -78,6 +81,7 @@ import { AuthScreen } from "@/pages/AuthScreen";
 import { ProducerOnboardingScreen } from "@/pages/ProducerOnboardingScreen";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { LeadMapPanel, StatusBadge } from "@/pages/LeadMapPanel";
+import { CampaignSimPanel } from "@/pages/CampaignSimPanel";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { createProduct } from "@/components/ProductEditor";
 import { LocationSearch } from "@/components/LocationSearch";
@@ -130,22 +134,6 @@ const conversations = [
     time: "acum",
     unread: 2,
   },
-  {
-    id: "casa",
-    title: "Casa Dobrogeană",
-    subtitle: "restaurant",
-    preview: "Lead recomandat pentru produse locale.",
-    time: "09:42",
-    unread: 0,
-  },
-  {
-    id: "sulina",
-    title: "Hotel Sulina",
-    subtitle: "hotel",
-    preview: "Potrivit pentru mic dejun și turiști.",
-    time: "ieri",
-    unread: 0,
-  },
 ];
 
 const feedbackOptions: LeadStatus[] = ["Bun", "Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
@@ -158,61 +146,50 @@ const productIcons = [
   { label: "hartă", icon: MapPin, className: "bg-[#e9efd8] text-[#4e6536]" },
 ];
 
+function findNextStepIndex(nextProfile: Profile, startIndex: number) {
+  const nextIndex = onboardingSteps.findIndex((item, index) => index >= startIndex && !nextProfile[item.key]);
+  return nextIndex === -1 ? onboardingSteps.length : nextIndex;
+}
 
-const enrichedMockDetails: Record<string, Partial<Lead>> = {
-  "lead-1": {
-    phone: "+40 722 334 455",
-    contactPerson: "Alexandru Radu (Manager)",
-    menuItems: "Clătite dobrogene, mic dejun tradițional, platou brânzeturi, salate",
-    supplyFrequency: "Săptămânal (preferă Marțea și Vinerea)",
-    notes: "Prețuiesc ingredientele autohtone cu poveste locală."
-  },
-  "lead-2": {
-    phone: "+40 733 445 566",
-    contactPerson: "Elena Sandu (Aprovizionare)",
-    menuItems: "Mic dejun bufet suedez, restaurant interior, bar piscină",
-    supplyFrequency: "Bilunar în cantități mari (minim 100 kg/livrare)",
-    notes: "Au nevoie de facturare rapidă și livrări programate exact dimineața."
-  },
-  "lead-3": {
-    phone: "+40 744 556 677",
-    contactPerson: "Mihai Popa (Proprietar)",
-    menuItems: "Cafea de origine, cheesecake, tarte, ceaiuri bio",
-    supplyFrequency: "Săptămânal (livrări de 10-15 borcane)",
-    notes: "Folosesc miere ca îndulcitor natural premium pentru specialități de cafea și ceai."
-  },
-  "lead-4": {
-    phone: "+40 755 667 788",
-    contactPerson: "Ioana Radu (Magazin)",
-    menuItems: "Brânzeturi maturate, vinuri locale, dulcețuri artizanale, miere",
-    supplyFrequency: "La nevoie (refacere stoc o dată la 2-3 săptămâni)",
-    notes: "Magazin boutique. Preferă borcane etichetate curat și ambalaje aspectuoase pentru cadouri."
-  },
-  "lead-5": {
-    phone: "+40 766 778 899",
-    contactPerson: "Andrei Stan (Chef Bucătar)",
-    menuItems: "Platouri gourmet, sosuri glaze cu miere, deserturi fine, brânzeturi",
-    supplyFrequency: "Săptămânal, preferă livrarea joia",
-    notes: "Caută brânzeturi premium de vacă sau oaie și miere de salcâm pentru sosuri caramelizate."
+function profileToChatSnapshot(profile: Profile) {
+  const summary = summarizeProducts(profile.products);
+  return {
+    product: profile.product || summary.product,
+    quantity: profile.quantity || summary.quantity,
+    products: (profile.products ?? []).map((p) => p.name.trim()).filter(Boolean),
+    location: profile.location ?? "",
+    latitude: profile.locationChoice?.lat ? Number.parseFloat(profile.locationChoice.lat) : null,
+    longitude: profile.locationChoice?.lon ? Number.parseFloat(profile.locationChoice.lon) : null,
+    rangeKm: parseRangeKm(profile.range ?? "35 km"),
+    range: profile.range ?? "",
+    days: profile.days ?? "",
+    deliveryDays: profile.days ?? "",
+  };
+}
+
+function mergeAgentProfileUpdates(current: Profile, updates: Record<string, unknown>): Profile {
+  const next: Profile = { ...current };
+
+  if (typeof updates.product === "string") next.product = updates.product;
+  if (typeof updates.quantity === "string") next.quantity = updates.quantity;
+  if (typeof updates.location === "string") next.location = updates.location;
+  if (typeof updates.range === "string") next.range = updates.range;
+  if (typeof updates.days === "string") next.days = updates.days;
+  if (typeof updates.deliveryDays === "string") next.days = updates.deliveryDays;
+
+  if (Array.isArray(updates.products) && updates.products.length) {
+    const names = updates.products.map(String).filter(Boolean);
+    next.products = names.map((name) => createProduct({ name }));
+    next.product = names.join(", ");
   }
-};
 
-const enrichLeads = (rawLeads: Lead[]): Lead[] => {
-  return rawLeads.map(lead => ({
-    ...lead,
-    ...(enrichedMockDetails[lead.id] || {
-      phone: "+40 722 000 000",
-      contactPerson: "Manager Aprovizionare",
-      menuItems: "Preparate generale din meniu",
-      supplyFrequency: "De stabilit",
-      notes: "Interesat de testarea calității produselor."
-    })
-  }));
-};
+  return next;
+}
 
 function App() {
   const [screen, setScreen] = useState<AppScreen>("auth");
   const [account, setAccount] = useState<ProducerAccount | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [dashboardView, setDashboardView] = useState<DashboardView>("chat");
   const [activeConversation, setActiveConversation] = useState("warm");
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
@@ -250,9 +227,15 @@ function App() {
   const [failedFeedbacks, setFailedFeedbacks] = useState<Record<string, string>>({});
   const [failedLeadDialog, setFailedLeadDialog] = useState<Lead | null>(null);
   const [customFailedReason, setCustomFailedReason] = useState("");
+  const [searchingMoreLeads, setSearchingMoreLeads] = useState(false);
+  const [campaignSimOpen, setCampaignSimOpen] = useState(false);
+  const [campaignSimLoading, setCampaignSimLoading] = useState(false);
+  const [campaignSimSteps, setCampaignSimSteps] = useState<SimulatedCampaignStep[]>([]);
+  const [campaignSimDisclaimer, setCampaignSimDisclaimer] = useState("");
 
   const onboardingDone = currentStep >= onboardingSteps.length;
-  const step = onboardingSteps[currentStep];
+  const activeStepIndex = findNextStepIndex(profile, 0);
+  const step = onboardingDone ? undefined : onboardingSteps[activeStepIndex] ?? onboardingSteps[currentStep];
 
   const activeLeadCount = useMemo(
     () => Object.values(leadStatuses).filter((status) => status !== "Nu e potrivit").length,
@@ -268,34 +251,58 @@ function App() {
 
     async function restoreSession() {
       try {
-        const { data } = await authClient.getSession();
-        if (!data?.user || cancelled) {
+        const sessionResult = await Promise.race([
+          authClient.getSession(),
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 8_000)),
+        ]);
+
+        if (cancelled) return;
+
+        const data =
+          sessionResult && typeof sessionResult === "object" && "data" in sessionResult
+            ? sessionResult.data
+            : null;
+
+        if (!data?.user) {
+          setScreen("auth");
           return;
         }
 
         const user = data.user;
+        setUserId(user.id);
         setAccount({ name: user.name, email: user.email });
 
-        const dto = await api.getProfile();
-        const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
-        setProfile(restoredProfile);
-
-        const { leads: storedLeads } = await api.listLeads();
-        if (!cancelled) {
-          setLeads(enrichLeads(storedLeads));
-          const statuses: Record<string, LeadStatus> = {};
-          for (const lead of storedLeads) {
-            if (lead.status) statuses[lead.id] = lead.status;
+        try {
+          const dto = await api.getProfile();
+          if (!cancelled) {
+            const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
+            setProfile(restoredProfile);
+            setCurrentStep(findNextStepIndex(restoredProfile, 0));
           }
-          setLeadStatuses(statuses);
+        } catch {
+          // profile optional on restore — user can still enter the app
         }
 
         setScreen("chat");
         setDashboardView("chat");
+
+        // Load leads in background — never block the initial render on discovery/AI.
+        void api
+          .listLeads()
+          .then(({ leads: storedLeads }) => {
+            if (cancelled) return;
+            setLeads(storedLeads);
+            const statuses: Record<string, LeadStatus> = {};
+            for (const lead of storedLeads) {
+              if (lead.status) statuses[lead.id] = lead.status;
+            }
+            setLeadStatuses(statuses);
+          })
+          .catch(() => undefined);
       } catch {
-        // stay on auth screen
+        setScreen("auth");
       } finally {
-        if (!cancelled) setAuthChecking(false);
+        setAuthChecking(false);
       }
     }
 
@@ -343,13 +350,24 @@ function App() {
           productSummary: productSummary.full || profile.product || "",
           locality: profile.location || "",
           tone: lead.tone,
+          leadType: lead.type,
+          website: lead.website || "",
+          menuItems: lead.menuItems || "",
+          notes: lead.notes || "",
         });
         textMsg = message;
       } catch {
         textMsg = lead.contact;
       }
     }
-    const phoneNum = lead.phone?.replace(/[+\s-]/g, "") || "40722123456";
+    const phoneNum = lead.phone?.replace(/[+\s-]/g, "") ?? "";
+    if (phoneNum.length < 10) {
+      addAgentText(
+        `${lead.name} nu are un număr de telefon public găsit online. Poți folosi mesajul sugerat și contacta prin site sau sursele din Detalii.`,
+        400,
+      );
+      return;
+    }
     window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(textMsg)}`, "_blank");
   }
 
@@ -357,7 +375,7 @@ function App() {
     if (!reason.trim()) return;
     setFailedFeedbacks((prev) => ({ ...prev, [leadId]: reason }));
     setLeadStatuses((prev) => ({ ...prev, [leadId]: "Nu e potrivit" }));
-    void api.updateLeadStatus(leadId, "Nu e potrivit").catch(() => undefined);
+    void api.updateLeadStatus(leadId, "Nu e potrivit", reason).catch(() => undefined);
 
     const targetLead = leads.find((l) => l.id === leadId);
     if (targetLead) {
@@ -370,15 +388,35 @@ function App() {
     setCustomFailedReason("");
   }
 
-  async function addOnboardingAgentReply(stepKey: string, userAnswer: string, fallback: string) {
+  async function sendAgentMessage(text: string, profileSnapshot?: Profile) {
+    const snapshot = profileSnapshot ?? profile;
+
+    if (!userId) {
+      addAgentText("Conectează-te pentru a folosi agentul AI.", 200);
+      return;
+    }
+
     setTyping(true);
     try {
-      const productSummary = summarizeProducts(profile.products);
-      const { reply } = await api.chatReply({
-        step: stepKey,
-        userAnswer,
-        profileHint: productSummary.full || profile.product,
+      const { reply, profileUpdates, leads: agentLeads, onboardingComplete } = await api.chatReply({
+        userId,
+        message: text,
+        profile: profileToChatSnapshot(snapshot),
       });
+
+      let mergedProfile = snapshot;
+      if (profileUpdates && Object.keys(profileUpdates).length) {
+        mergedProfile = mergeAgentProfileUpdates(snapshot, profileUpdates);
+        setProfile(mergedProfile);
+        void api.updateProfile(setupToApiPayload(mergedProfile)).catch(() => undefined);
+      }
+
+      if (onboardingComplete || findNextStepIndex(mergedProfile, 0) >= onboardingSteps.length) {
+        setCurrentStep(onboardingSteps.length);
+      } else {
+        setCurrentStep(findNextStepIndex(mergedProfile, 0));
+      }
+
       setMessages((items) => [
         ...items,
         {
@@ -389,7 +427,48 @@ function App() {
           time: now(),
         },
       ]);
+
+      if (agentLeads?.length) {
+        const existingIds = new Set(leads.map((l) => l.id));
+        const newLeads = agentLeads.filter((l) => !existingIds.has(l.id));
+        if (newLeads.length) {
+          setLeads((current) => [...current, ...newLeads]);
+          setMessages((items) => [
+            ...items,
+            ...newLeads.map<ChatMessage>((lead) => ({
+              id: crypto.randomUUID(),
+              role: "agent",
+              kind: "lead",
+              leadId: lead.id,
+              time: now(),
+            })),
+          ]);
+        }
+      }
     } catch {
+      setMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          kind: "text",
+          text: "Nu am putut contacta agentul acum. Încearcă din nou.",
+          time: now(),
+        },
+      ]);
+    } finally {
+      setTyping(false);
+    }
+  }
+
+  async function addOnboardingAgentReply(_stepKey: string, _userAnswer: string, fallback: string) {
+    if (userId) {
+      await sendAgentMessage(_userAnswer);
+      return;
+    }
+
+    setTyping(true);
+    window.setTimeout(() => {
       setMessages((items) => [
         ...items,
         {
@@ -400,8 +479,31 @@ function App() {
           time: now(),
         },
       ]);
-    } finally {
       setTyping(false);
+    }, 420);
+  }
+
+  async function runCampaignSimulation() {
+    if (campaignSimLoading || !leads.length) return;
+    setCampaignSimOpen(true);
+    setCampaignSimLoading(true);
+    setCampaignSimSteps([]);
+    try {
+      const { steps, disclaimer } = await api.simulateCampaign({ maxLeads: 3 });
+      setCampaignSimSteps(steps);
+      setCampaignSimDisclaimer(disclaimer);
+      addAgentText(
+        `Am rulat o simulare pentru ${steps.length} lead-uri reale. Nicio trimitere reală — vezi panoul „Simulare campanie”.`,
+        300,
+      );
+    } catch (error) {
+      setCampaignSimOpen(false);
+      addAgentText(
+        messageFromUnknownError(error, "Simularea campaniei nu a putut rula acum."),
+        300,
+      );
+    } finally {
+      setCampaignSimLoading(false);
     }
   }
 
@@ -417,6 +519,10 @@ function App() {
         productSummary: productSummary.full || profile.product || "",
         locality: profile.location || "",
         tone: lead.tone,
+        leadType: lead.type,
+        website: lead.website || "",
+        menuItems: lead.menuItems || "",
+        notes: lead.notes || "",
       })
       .then(({ message }) => setMessageDraft(message))
       .catch(() => setMessageDraft(lead.contact))
@@ -450,7 +556,7 @@ function App() {
     window.setTimeout(async () => {
       try {
         const { leads: matchedLeads } = await api.matchLeads();
-        setLeads(enrichLeads(matchedLeads));
+        setLeads(matchedLeads);
         setMessages((items) => [
           ...items,
           {
@@ -491,9 +597,65 @@ function App() {
     }, delay);
   }
 
-  function findNextStepIndex(nextProfile: Profile, startIndex: number) {
-    const nextIndex = onboardingSteps.findIndex((item, index) => index >= startIndex && !nextProfile[item.key]);
-    return nextIndex === -1 ? onboardingSteps.length : nextIndex;
+  async function searchMoreLeads() {
+    if (searchingMoreLeads || typing) return;
+    setSearchingMoreLeads(true);
+    setTyping(true);
+    try {
+      const { leads: freshLeads } = await api.matchMoreLeads();
+      const existingIds = new Set(leads.map((l) => l.id));
+      const newLeads = freshLeads.filter((l) => !existingIds.has(l.id));
+
+      if (newLeads.length === 0) {
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text: "Am căutat din nou pe internet, dar nu am găsit alte lead-uri noi în raza ta acum. Poți mări raza sau reîncerca mai târziu.",
+            time: now(),
+          },
+        ]);
+        return;
+      }
+
+      setLeads((current) => [...current, ...newLeads]);
+      setMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          kind: "text",
+          text: `Am găsit încă ${newLeads.length} lead-uri noi. Agentul a exclus afacerile deja afișate.`,
+          time: now(),
+        },
+        ...newLeads.map<ChatMessage>((lead) => ({
+          id: crypto.randomUUID(),
+          role: "agent",
+          kind: "lead",
+          leadId: lead.id,
+          time: now(),
+        })),
+      ]);
+    } catch (error) {
+      setMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "agent",
+          kind: "text",
+          text: messageFromUnknownError(
+            error,
+            "Nu am putut căuta alte lead-uri acum. Încearcă din nou.",
+          ),
+          time: now(),
+        },
+      ]);
+    } finally {
+      setSearchingMoreLeads(false);
+      setTyping(false);
+    }
   }
 
   function startChatWithProfile(nextProfile: Profile, producerName?: string) {
@@ -558,6 +720,7 @@ function App() {
     }
 
     const user = result.data!.user;
+    setUserId(user.id);
     setAccount({ name: user.name, email: user.email });
 
     const dto = await api.getProfile();
@@ -573,6 +736,8 @@ function App() {
     }
 
     setAccount({ name, email });
+    const signedUpUser = result.data?.user;
+    if (signedUpUser?.id) setUserId(signedUpUser.id);
     await api.updateProfile(setupToApiPayload(setup));
 
     const productSummary = summarizeProducts(setup.products);
@@ -646,9 +811,10 @@ function App() {
 
   function handleAnswer(value: string) {
     const cleanValue = value.trim();
-    if (!cleanValue || !step || typing) return;
+    if (!cleanValue || typing) return;
+    if (!onboardingDone && !step) return;
 
-    const answeredStep = step;
+    const answeredStep = step!;
     const nextProfile = { ...profile, [answeredStep.key]: cleanValue };
     const nextStepIndex = findNextStepIndex(nextProfile, currentStep + 1);
 
@@ -675,17 +841,38 @@ function App() {
       return;
     }
 
+    void api.updateProfile(setupToApiPayload(nextProfile)).catch(() => undefined);
     void addOnboardingAgentReply(
       answeredStep.key,
       cleanValue,
       `Perfect. Am notat: ${nextProfile.product}, ${nextProfile.quantity}, din ${nextProfile.location}, livrare ${nextProfile.range}, în zilele ${nextProfile.days}.`,
     );
-    void api.updateProfile(setupToApiPayload(nextProfile)).catch(() => undefined);
-    addRecommendations(1100);
+    if (!userId) {
+      addRecommendations(1100);
+    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const cleanValue = input.trim();
+    if (!cleanValue || typing) return;
+
+    if (onboardingDone) {
+      setInput("");
+      setMessages((items) => [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          kind: "text",
+          text: cleanValue,
+          time: now(),
+        },
+      ]);
+      void sendAgentMessage(cleanValue);
+      return;
+    }
+
     handleAnswer(input);
   }
 
@@ -812,7 +999,37 @@ function App() {
                     ))}
                   </div>
                 ) : (
-                  <div className="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2 pb-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={campaignSimLoading || typing || !leads.length}
+                      onClick={() => void runCampaignSimulation()}
+                      className="shrink-0 border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                    >
+                      {campaignSimLoading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5" />
+                      )}
+                      Simulare campanie
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={searchingMoreLeads || typing}
+                      onClick={() => void searchMoreLeads()}
+                      className="shrink-0 border-[#c8d9aa] bg-[#f0f5e8] text-[#3f532c] hover:bg-[#e3edd4]"
+                    >
+                      {searchingMoreLeads ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Search className="h-3.5 w-3.5" />
+                      )}
+                      Caută alte lead-uri
+                    </Button>
                     {leads.slice(0, 3).map((lead) => (
                       <Button
                         key={lead.id}
@@ -833,11 +1050,15 @@ function App() {
                   <Input
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
-                    disabled={onboardingDone || typing}
-                    placeholder={onboardingDone ? "Alege un lead sau marchează ce s-a întâmplat" : step?.placeholder}
+                    disabled={typing}
+                    placeholder={
+                      onboardingDone
+                        ? "Întreabă agentul, cere alte lead-uri sau ajutor cu mesaje..."
+                        : step?.placeholder
+                    }
                     className="bg-white/90"
                   />
-                  <Button type="submit" size="icon" variant="honey" disabled={!input.trim() || onboardingDone || typing}>
+                  <Button type="submit" size="icon" variant="honey" disabled={!input.trim() || typing}>
                     <Send className="h-4 w-4" />
                     <span className="sr-only">Trimite</span>
                   </Button>
@@ -857,6 +1078,8 @@ function App() {
                 statuses={leadStatuses}
                 failedFeedbacks={failedFeedbacks}
                 activeLeadCount={displayLeadCount}
+                searchingMore={searchingMoreLeads}
+                onSearchMore={() => void searchMoreLeads()}
                 onDetails={setSelectedLead}
                 onMessage={openMessageLead}
                 onStatus={updateLeadStatus}
@@ -878,6 +1101,14 @@ function App() {
         onOpenChange={(open) => !open && setMessageLead(null)}
         onCopy={copySuggestedMessage}
         onWhatsAppSend={() => handleWhatsAppRedirect(messageLead!)}
+      />
+
+      <CampaignSimPanel
+        open={campaignSimOpen}
+        loading={campaignSimLoading}
+        disclaimer={campaignSimDisclaimer}
+        steps={campaignSimSteps}
+        onClose={() => setCampaignSimOpen(false)}
       />
 
       <Dialog open={Boolean(failedLeadDialog)} onOpenChange={(open) => !open && setFailedLeadDialog(null)}>
@@ -1272,6 +1503,19 @@ function LeadCard({
         </p>
 
         <div className="grid gap-2 sm:grid-cols-2 text-xs border-t border-[#eadfca] pt-3">
+          {lead.website && (
+            <div className="sm:col-span-2">
+              <span className="font-bold text-[#33412c]">🌐 Website:</span>{" "}
+              <a
+                href={normalizeUrl(lead.website)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[#4d6638] underline-offset-2 hover:underline"
+              >
+                {lead.website}
+              </a>
+            </div>
+          )}
           {lead.phone && (
             <div>
               <span className="font-bold text-[#33412c]">📞 Contact:</span>{" "}
@@ -1394,9 +1638,55 @@ function LeadDetailsDialog({
             <DetailRow icon={MapPin} label="Distanță" value={lead.distance} />
             <DetailRow icon={BadgeCheck} label="Potrivire" value={`${lead.match}%`} />
             <DetailRow icon={CalendarDays} label="Moment bun" value={lead.bestDay} />
+            {lead.website ? (
+              <DetailLinkRow icon={Globe} label="Website" href={normalizeUrl(lead.website)} text={lead.website} />
+            ) : null}
+            {lead.phone ? (
+              <DetailRow
+                icon={Phone}
+                label="Telefon"
+                value={lead.contactPerson ? `${lead.phone} · ${lead.contactPerson}` : lead.phone}
+              />
+            ) : null}
+            {lead.menuItems ? <InfoBlock title="Meniu / ofertă" text={lead.menuItems} /> : null}
+            {lead.notes ? <InfoBlock title="Informații din surse web" text={lead.notes} /> : null}
+            {lead.sourceUrls?.length ? (
+              <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-4">
+                <p className="text-sm font-bold text-[#263421]">Surse online</p>
+                <ul className="mt-2 space-y-1.5">
+                  {lead.sourceUrls.map((url, index) => (
+                    <li key={`${url}-${index}`}>
+                      <a
+                        href={normalizeUrl(url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-sm text-[#4d6638] underline-offset-2 hover:underline"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                        {url.includes("vertexaisearch.cloud.google.com")
+                          ? `Sursă web ${index + 1}`
+                          : url}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </TabsContent>
           <TabsContent value="why" className="space-y-4">
             <InfoBlock title="Îl recomand pentru că" text={lead.reason} />
+            {lead.needs?.length ? (
+              <InfoBlock
+                title="Nevoi estimate"
+                text={lead.needs.join(", ")}
+              />
+            ) : null}
+            {lead.matchedNeeds?.length ? (
+              <InfoBlock
+                title="Potrivire cu produsele tale"
+                text={lead.matchedNeeds.join(", ")}
+              />
+            ) : null}
             <InfoBlock title="Ai putea să-i vinzi" text={lead.sell} />
           </TabsContent>
           <TabsContent value="message">
@@ -1482,6 +1772,43 @@ function DetailRow({ icon: Icon, label, value }: { icon: typeof MapPin; label: s
       </div>
     </div>
   );
+}
+
+function DetailLinkRow({
+  icon: Icon,
+  label,
+  href,
+  text,
+}: {
+  icon: typeof MapPin;
+  label: string;
+  href: string;
+  text: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-3">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e9f0dc] text-[#4d6638]">
+        <Icon className="h-5 w-5" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-[#4d6638] underline-offset-2 hover:underline break-all"
+        >
+          {text}
+          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function normalizeUrl(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  return `https://${url.replace(/^\/+/, "")}`;
 }
 
 function InfoBlock({ title, text }: { title: string; text: string }) {

@@ -15,6 +15,14 @@ export async function matchLeads(req: Request, res: Response): Promise<void> {
   res.json({ leads });
 }
 
+export async function matchMoreLeads(req: Request, res: Response): Promise<void> {
+  const leads = await leadService.matchMoreForUser(
+    req.user!.id,
+    req.body as MatchLeadsInput,
+  );
+  res.json({ leads });
+}
+
 export async function listLeads(req: Request, res: Response): Promise<void> {
   const leads = await leadService.listLeadsForUser(req.user!.id);
   res.json({ leads });
@@ -26,10 +34,20 @@ export async function getLead(req: Request, res: Response): Promise<void> {
 }
 
 export async function putLeadStatus(req: Request, res: Response): Promise<void> {
+  const body = req.body as { status: string; reason?: string };
   const result = await leadService.updateLeadStatus(
     req.user!.id,
     paramId(req),
-    (req.body as { status: string }).status,
+    body.status,
+    body.reason,
+  );
+  res.json(result);
+}
+
+export async function simulateCampaign(req: Request, res: Response): Promise<void> {
+  const result = await leadService.simulateCampaignForUser(
+    req.user!.id,
+    req.body,
   );
   res.json(result);
 }

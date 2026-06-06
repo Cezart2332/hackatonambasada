@@ -1,4 +1,4 @@
-import React, { useEffect, type ComponentType } from "react";
+import React, { useEffect, useState, type ComponentType } from "react";
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import {
@@ -13,6 +13,10 @@ import {
   AlertTriangle,
   Search,
   Loader2,
+  ChevronDown,
+  UserRound,
+  Phone,
+  Package,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -176,16 +180,19 @@ export function MapLeadRow({
   onFailedClick: (lead: Lead) => void;
   isVenue?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const Icon = leadIcon(lead.icon);
 
   return (
-    <div className={cn(
-      "w-full rounded-2xl border p-3 transition-colors",
-      failedFeedback ? "border-[#ead2cc] bg-[#fffcfb]" : "border-[#ded5bf] bg-[#fffdf7]"
-    )}>
-      <div className="flex gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[#e9f0dc] text-[#4d6638]">
-          <Icon className="h-5 w-5" />
+    <div
+      className={cn(
+        "w-full rounded-xl border transition-colors",
+        failedFeedback ? "border-[#ead2cc] bg-[#fffcfb]" : "border-[#ded5bf] bg-[#fffdf7]",
+      )}
+    >
+      <div className="flex gap-2.5 p-2.5">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#e9f0dc] text-[#4d6638]">
+          <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
@@ -193,92 +200,135 @@ export function MapLeadRow({
               <div className="flex flex-wrap items-center gap-1">
                 <p className="truncate text-sm font-extrabold text-[#263421]">{lead.name}</p>
                 {lead.verified ? <Badge variant="olive" className="shrink-0 text-[10px]">Verificat</Badge> : null}
-                {lead.match >= 85 ? <Badge variant="warm" className="shrink-0 text-[10px]">Top</Badge> : null}
-                {lead.matchFactors ? (
+                {isVenue && lead.matchFactors ? (
                   <Badge variant={lead.matchFactors.inRange ? "olive" : "outline"} className="shrink-0 text-[10px]">
                     {lead.matchFactors.inRange ? "În raza ta" : "În afara razei"}
                   </Badge>
                 ) : null}
+                {!isVenue && lead.match >= 85 ? <Badge variant="warm" className="shrink-0 text-[10px]">Top</Badge> : null}
               </div>
               <p className="truncate text-xs text-muted-foreground">{lead.location}</p>
             </div>
-            <Badge variant="blue" className="shrink-0">
-              {lead.match}%
-            </Badge>
+            <div className="flex shrink-0 items-center gap-1">
+              <Badge variant="blue" className="text-[10px]">
+                {lead.match}%
+              </Badge>
+              <button
+                type="button"
+                onClick={() => setExpanded((open) => !open)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#ded5bf] bg-white text-[#526047] transition hover:bg-[#f1eadb]"
+                aria-expanded={expanded}
+                aria-label={expanded ? "Ascunde detalii" : "Arată detalii"}
+              >
+                <ChevronDown className={cn("h-4 w-4 transition", expanded && "rotate-180")} />
+              </button>
+            </div>
           </div>
-          
+
           {lead.phone ? (
-            <p className="mt-1 text-[11px] text-[#6a7360]">
-              {lead.contactPerson ? `👤 ${lead.contactPerson} · ` : ""}📞 {lead.phone}
-            </p>
-          ) : null}
-
-          <p className="mt-2 line-clamp-2 text-xs text-[#5a654f]">
-{isVenue ? "Recomand pentru că" : "Îl recomand pentru că"} {lead.reason}
-          </p>
-
-          {failedFeedback ? (
-            <div className="mt-2 text-xs font-semibold text-[#884636] bg-[#fae8e4] border border-[#ead2cc] rounded-xl p-2 flex items-start gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#884636] mt-0.5" />
-              <span>Contact eșuat: {failedFeedback}</span>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {lead.contactPerson ? (
+                <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#d5dfc8] bg-[#eef4e6] px-2.5 py-1 text-sm font-semibold text-[#3f532c]">
+                  <UserRound className="h-4 w-4 shrink-0 text-[#5a7040]" strokeWidth={2.25} />
+                  {lead.contactPerson}
+                </span>
+              ) : null}
+              <a
+                href={`tel:${lead.phone.replace(/\s/g, "")}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#c5d8e4] bg-[#e8f2f7] px-2.5 py-1 text-sm font-bold text-[#2a4a5e] transition hover:bg-[#dceaf2]"
+              >
+                <Phone className="h-4 w-4 shrink-0 text-[#3d6b82]" strokeWidth={2.25} />
+                {lead.phone}
+              </a>
             </div>
           ) : null}
 
-          <p className="mt-2 line-clamp-2 text-xs text-[#5a654f]">
-            <span className="font-bold">{isVenue ? "Oferă:" : "Ai putea să-i vinzi:"}</span> {lead.sell}
-          </p>
+          <div className="mt-2 rounded-lg border border-[#e0d8c4] bg-[#f8f4ea] px-2.5 py-2">
+            <p className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-[#5a7040]">
+              <Package className="h-4 w-4 shrink-0" strokeWidth={2.25} />
+              {isVenue ? "Oferă" : "Ai putea să-i vinzi"}
+            </p>
+            <p className="text-sm font-semibold leading-relaxed text-[#263421] sm:text-[15px]">
+              {lead.sell}
+            </p>
+          </div>
 
-          {isVenue ? <div className="mt-2"><MatchWhySection lead={lead} isVenue /></div> : null}
-
-          {status ? (
-            <div className="mt-2">
-              <StatusBadge status={status} />
+          {!expanded && (status || failedFeedback) ? (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1">
+              {status ? <StatusBadge status={status} /> : null}
+              {failedFeedback ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#ead2cc] bg-[#fae8e4] px-2 py-0.5 text-[10px] font-semibold text-[#884636]">
+                  <AlertTriangle className="h-3 w-3" />
+                  Contact eșuat
+                </span>
+              ) : null}
             </div>
           ) : null}
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={() => onDetails(lead)}>
-          Detalii
-        </Button>
-        <Button type="button" variant="honey" size="sm" className="min-h-11" onClick={() => onMessage(lead)}>
-          Mesaj
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => onWhatsAppClick(lead)}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-1"
-        >
-          <MessageCircle className="h-4 w-4" />
-          WhatsApp
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="min-h-11 text-rose-700 hover:bg-rose-50 border-rose-200 hover:border-rose-300"
-          onClick={() => onFailedClick(lead)}
-        >
-          Ceva n-a mers
-        </Button>
-      </div>
+      {expanded ? (
+        <div className="space-y-2 border-t border-[#ebe4d4] px-2.5 pb-2.5 pt-2">
+          {!isVenue ? (
+            <p className="text-xs text-[#5a654f]">
+              <span className="font-semibold text-[#33412c]">Îl recomand pentru că</span> {lead.reason}
+            </p>
+          ) : null}
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {feedbackOptions.map((option) => (
-          <Button
-            key={option}
-            type="button"
-            size="sm"
-            variant={status === option ? "default" : "chip"}
-            className="h-8"
-            onClick={() => onStatus(lead, option)}
-          >
-            {option}
-          </Button>
-        ))}
-      </div>
+          {failedFeedback ? (
+            <div className="flex items-start gap-1.5 rounded-lg border border-[#ead2cc] bg-[#fae8e4] p-2 text-xs font-semibold text-[#884636]">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#884636]" />
+              <span>Contact eșuat: {failedFeedback}</span>
+            </div>
+          ) : null}
+
+          {isVenue ? <MatchWhySection lead={lead} isVenue /> : null}
+
+          {status ? <StatusBadge status={status} /> : null}
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => onDetails(lead)}>
+              Detalii
+            </Button>
+            <Button type="button" variant="honey" size="sm" className="h-9" onClick={() => onMessage(lead)}>
+              Mesaj
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="flex h-9 items-center justify-center gap-1 bg-emerald-600 font-semibold text-white hover:bg-emerald-700"
+              onClick={() => onWhatsAppClick(lead)}
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              WhatsApp
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 border-rose-200 text-rose-700 hover:border-rose-300 hover:bg-rose-50"
+              onClick={() => onFailedClick(lead)}
+            >
+              Ceva n-a mers
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-1">
+            {feedbackOptions.map((option) => (
+              <Button
+                key={option}
+                type="button"
+                size="sm"
+                variant={status === option ? "default" : "chip"}
+                className="h-7 px-2 text-[11px]"
+                onClick={() => onStatus(lead, option)}
+              >
+                {option}
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -306,7 +356,7 @@ function LeadsList({
 }) {
   return (
     <ScrollArea className="h-full min-h-0">
-      <div className="mx-auto flex w-full max-w-full flex-col gap-2 px-4 py-3">
+      <div className={cn("mx-auto flex w-full max-w-full flex-col px-3 py-2", isVenue ? "gap-1.5" : "gap-2")}>
         {leads.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             Niciun lead nu trece filtrele selectate.
@@ -348,6 +398,7 @@ export function LeadMapPanel({
   layout = "stack",
   mobilePanel = "list",
   mapActive = true,
+  listPrimary = false,
 }: {
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
@@ -365,6 +416,7 @@ export function LeadMapPanel({
   layout?: "stack" | "split";
   mobilePanel?: "list" | "map";
   mapActive?: boolean;
+  listPrimary?: boolean;
 }) {
   const list = (
     <LeadsList
@@ -390,7 +442,14 @@ export function LeadMapPanel({
 
   const mapAndList =
     layout === "split" ? (
-      <div className="flex h-full min-h-0 w-full flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,42%)]">
+      <div
+        className={cn(
+          "flex h-full min-h-0 w-full flex-col lg:grid",
+          listPrimary
+            ? "lg:grid-cols-[minmax(0,1fr)_minmax(240px,28%)]"
+            : "lg:grid-cols-[minmax(0,1fr)_minmax(300px,42%)]",
+        )}
+      >
         <div
           className={cn(
             "min-h-0 overflow-hidden border-[#d7ccb3] lg:border-r",

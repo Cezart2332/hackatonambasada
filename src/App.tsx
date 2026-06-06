@@ -2149,12 +2149,12 @@ function LeadCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4 p-4 pt-0">
-        <div className="rounded-2xl bg-[#f5f0e5] p-3">
-          <p className="text-sm font-semibold text-[#29361f]">
-            {isVenue ? "Recomand pentru că..." : "Îl recomand pentru că..."}
-          </p>
-          <p className="mt-1 text-sm text-[#5a654f]">{lead.reason}</p>
-        </div>
+        {!isVenue ? (
+          <div className="rounded-2xl bg-[#f5f0e5] p-3">
+            <p className="text-sm font-semibold text-[#29361f]">Îl recomand pentru că...</p>
+            <p className="mt-1 text-sm text-[#5a654f]">{lead.reason}</p>
+          </div>
+        ) : null}
 
         {failedFeedback ? (
           <div className="rounded-2xl border border-[#ead2cc] bg-[#fdf0ec] p-3 text-sm font-semibold text-[#884636] flex items-start gap-2">

@@ -41,9 +41,24 @@ _STREET_PREFIXES = re.compile(
 )
 # Matches parenthetical notes the LLM inserts, e.g. "(la parterul Hotelului X)"
 _PARENTHETICAL = re.compile(r"\([^)]*\)")
+_PARENTHETICAL_CONTENT = re.compile(r"\(([^)]*)\)")
 # Matches "Sat X, comuna Y" administrative prefix
 _SAT_COMUNA = re.compile(r"\bsat\b[^,]*,?\s*\bcomuna\b[^,]*,?", re.IGNORECASE)
 _BROAD_LOCALITIES = {"dobrogea", "dobrogea plateau", "regiunea dobrogea"}
+_MULTI_LOCATION_MARKERS = re.compile(
+    r"\b(locatii multiple|locații multiple|adrese specifice|mai multe locații|mai multe locatii|promoții|promotii)\b",
+    re.IGNORECASE,
+)
+_RELATIVE_LANDMARKS = [
+    re.compile(r"\bzona\s+food\s*court\s*[-–—]?\s*", re.IGNORECASE),
+    re.compile(r"\bvis[-\s]*a[-\s]*vis\s+de\s+[^,;]+,?\s*", re.IGNORECASE),
+    re.compile(r"\bl[âa]ng[ăa]\s+[^,;]+,?\s*", re.IGNORECASE),
+    re.compile(r"\baproape\s+de\s+[^,;]+,?\s*", re.IGNORECASE),
+]
+_STREET_TOKEN = re.compile(
+    r"\b(str\.?|strada|bd\.?|b-dul|blvd|bulevardul|aleea|șoseaua|soseaua|piața|piata)\b",
+    re.IGNORECASE,
+)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -96,6 +111,72 @@ def _expand_street_abbreviations(address: str) -> str:
         return "Strada "
 
     return _STREET_ABBREVIATIONS.sub(repl, address).strip()
+
+
+def _cleanup_address_fragment(fragment: str) -> str:
+    text = (fragment or "").strip(" ,;:-")
+    if not text:
+        return ""
+    text = re.sub(
+        r"^\s*(?:adrese\s+specifice(?:\s+pentru\s+promo[țt]ii)?|loca[țt]ii\s+multiple)\s*:?\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    for pattern in _RELATIVE_LANDMARKS:
+        text = pattern.sub("", text)
+    text = re.sub(r"\b(intersec[țt]ie|intersectie)\s+cu\s+[^,;]+", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s*,\s*,+", ", ", text)
+    return text.strip(" ,;:-")
+
+
+def _split_street_list(fragment: str) -> list[str]:
+    if len(_STREET_TOKEN.findall(fragment)) < 2:
+        return [fragment]
+    parts = re.split(
+        r",\s*(?=(?:str\.?|strada|bd\.?|b-dul|blvd|bulevardul|aleea|șoseaua|soseaua|piața|piata)\b)",
+        fragment,
+        flags=re.IGNORECASE,
+    )
+    return [part.strip(" ,") for part in parts if part.strip(" ,")]
+
+
+def _raw_address_fragments(address: str) -> list[str]:
+    """Break LLM-style multi-location addresses into geocodable chunks."""
+    text = (address or "").strip()
+    if not text:
+        return []
+
+    parenthetical = [
+        content.strip()
+        for content in _PARENTHETICAL_CONTENT.findall(text)
+        if _STREET_TOKEN.search(content) or _MULTI_LOCATION_MARKERS.search(content)
+    ]
+    base = _PARENTHETICAL.sub("", text)
+    seed_parts = [base, *parenthetical]
+
+    fragments: list[str] = []
+    for seed in seed_parts:
+        normalized = re.sub(r"[\n|]+", ";", seed)
+        normalized = re.sub(r"\s*/\s*", ";", normalized)
+        normalized = re.sub(r"\s+;\s+", ";", normalized)
+        for chunk in [part.strip() for part in normalized.split(";") if part.strip()]:
+            if ":" in chunk and (_STREET_TOKEN.search(chunk) or _MULTI_LOCATION_MARKERS.search(chunk)):
+                chunk = chunk.split(":", 1)[1].strip()
+            for street_part in _split_street_list(chunk):
+                cleaned = _cleanup_address_fragment(street_part)
+                if (
+                    cleaned
+                    and re.search(r"\b(?:sau|ori)\b", _fold(cleaned))
+                    and not _STREET_TOKEN.search(cleaned)
+                    and not re.search(r"\d", cleaned)
+                ):
+                    continue
+                if cleaned:
+                    fragments.append(cleaned)
+
+    return list(dict.fromkeys(fragments))
 
 
 def _address_variants(address: str) -> list[str]:
@@ -184,16 +265,27 @@ def _normalize_address(address: str, locality: str) -> str:
 def _build_geocode_queries(name: str, address: str, locality: str) -> list[str]:
     name = (name or "").strip()
     locality = _clean_locality(locality) or infer_city_from_address(address)
-    clean_address = _normalize_address(address, locality)
-    address_locality_suffix = (
-        f", {locality}"
-        if locality and not _text_contains_locality(clean_address, locality)
-        else ""
-    )
     name_locality_suffix = f", {locality}" if locality else ""
 
     queries: list[str] = []
-    if clean_address and len(clean_address) > 6:
+    clean_addresses: list[str] = []
+    for fragment in _raw_address_fragments(address):
+        clean = _normalize_address(fragment, locality)
+        if clean and len(clean) > 3:
+            clean_addresses.append(clean)
+    if not clean_addresses:
+        clean = _normalize_address(address, locality)
+        if clean:
+            clean_addresses.append(clean)
+
+    for clean_address in list(dict.fromkeys(clean_addresses)):
+        address_locality_suffix = (
+            f", {locality}"
+            if locality and not _text_contains_locality(clean_address, locality)
+            else ""
+        )
+        if not clean_address or len(clean_address) <= 6:
+            continue
         for variant in _address_variants(clean_address):
             if name:
                 queries.append(f"{name}, {variant}{address_locality_suffix}, Romania")
@@ -278,18 +370,24 @@ def _matches_requested_locality(item: dict, locality: str | None) -> bool:
 
     address = item.get("address") if isinstance(item.get("address"), dict) else {}
     # Extended list: include hamlet, neighbourhood, quarter for rural/resort localities
-    locality_fields = [
+    precise_locality_fields = [
         "city", "town", "village", "municipality",
         "hamlet", "suburb", "neighbourhood", "quarter",
-        "city_district", "county",
+        "city_district",
     ]
-    values = [_fold(str(address.get(field) or "")) for field in locality_fields]
+    values = [_fold(str(address.get(field) or "")) for field in precise_locality_fields]
     values = [value for value in values if value]
+
+    if not values:
+        county = _fold(str(address.get("county") or ""))
+        values = [county] if county else []
 
     if values:
         # Exact match OR target is substring of a value (handles "Vadu" inside longer strings)
         if any(target == v or target in v or v in target for v in values):
             return True
+        if any(_fold(str(address.get(field) or "")) for field in precise_locality_fields):
+            return False
 
     # Fallback: check display_name
     display = _fold(str(item.get("display_name") or ""))

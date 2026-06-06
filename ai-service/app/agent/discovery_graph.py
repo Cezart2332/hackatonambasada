@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -72,11 +73,21 @@ def _address_needs_enrichment(address: str, locality: str) -> bool:
     weak_markers = {
         "locație aproximativă",
         "locatie aproximativa",
+        "locații multiple",
+        "locatii multiple",
+        "adrese specifice",
+        "promoții",
+        "promotii",
         "lângă",
         "langa",
+        "vis-a-vis",
+        "vis a vis",
+        "food court",
         "zona",
     }
     if any(marker in lower for marker in weak_markers):
+        return True
+    if ";" in clean or re.search(r"\b(?:sau|ori)\b", lower):
         return True
     if len(clean) < 16:
         return True

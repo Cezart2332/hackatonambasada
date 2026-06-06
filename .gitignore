@@ -9,6 +9,15 @@ dist-ssr/
 # TypeScript
 *.tsbuildinfo
 
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
 # Logs
 logs/
 *.log
@@ -37,6 +46,8 @@ Thumbs.db
 
 # Test / coverage
 coverage/
+.coverage
+htmlcov/
 
 # Agent skills (not app source)
 .agents/

@@ -24,6 +24,42 @@ def _fetch_business_context(*, website: str, business_name: str) -> str:
         return ""
 
 
+def draft_venue_procurement_message(
+    *,
+    producer_name: str,
+    venue_name: str,
+    products: str,
+    supply_frequency: str = "",
+    preferred_days: str = "",
+    producer_products: str = "",
+    locality: str = "",
+    tone: str = "cald, direct",
+) -> str:
+    settings = get_settings()
+    if not settings.llm_enabled:
+        raise RuntimeError("OPEN_ROUTER_KEY not configured")
+
+    prompt = (
+        f"Scrie un mesaj scurt de aprovizionare în română de la un local HoReCa către un producător.\n\n"
+        f"Local: {venue_name or 'local din Dobrogea'}\n"
+        f"Producător: {producer_name}\n"
+        f"Căutăm: {products or 'produse locale'}\n"
+        f"Cantitate/frecvență: {supply_frequency or 'de confirmat'}\n"
+        f"Zile preferate livrare: {preferred_days or 'de confirmat'}\n"
+        f"Locație: {locality or 'Dobrogea'}\n"
+        f"Produse oferite de producător: {producer_products or 'produse locale'}\n"
+        f"Ton: {tone}\n\n"
+        "Reguli: 4–8 propoziții, cerere clară de ofertă și disponibilitate, menționează cantitatea și zilele. "
+        "Returnează DOAR textul mesajului."
+    )
+
+    model = get_chat_model(temperature=0.35)
+    content = model.invoke(prompt).content
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+    raise RuntimeError("LLM venue procurement draft failed")
+
+
 def draft_outreach_message(
     *,
     business_name: str,
@@ -34,8 +70,23 @@ def draft_outreach_message(
     product_summary: str = "",
     locality: str = "",
     tone: str = "cald, direct",
+    account_type: str = "producer",
+    venue_business_name: str = "",
+    supply_frequency: str = "",
+    preferred_days: str = "",
 ) -> str:
-    """Personalized outreach draft — returns text only, never sends."""
+    if account_type == "venue":
+        return draft_venue_procurement_message(
+            producer_name=business_name,
+            venue_name=venue_business_name,
+            products=product_summary,
+            supply_frequency=supply_frequency,
+            preferred_days=preferred_days,
+            producer_products=menu_items,
+            locality=locality,
+            tone=tone,
+        )
+
     settings = get_settings()
     if not settings.llm_enabled:
         raise RuntimeError("OPEN_ROUTER_KEY not configured")
@@ -70,3 +121,4 @@ def draft_outreach_message(
     except Exception as exc:
         logger.warning("LLM outreach draft failed for %s: %s", business_name, exc)
         raise RuntimeError("LLM outreach draft failed") from exc
+    raise RuntimeError("LLM outreach draft failed")

@@ -14,7 +14,9 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FieldBlock } from "@/components/FormBlocks";
 import { InventoryLineEditor } from "@/components/ProductEditor";
-import type { Profile, ProducerProduct } from "@/lib/types";
+import { LogoutSection } from "@/components/LogoutSection";
+import { PlanSection } from "@/components/PlanSection";
+import type { PlanContext, Profile, ProducerProduct } from "@/lib/types";
 
 function ProfileRow({ label, value, icon: Icon }: { label: string; value?: string; icon: typeof Wheat }) {
   return (
@@ -76,22 +78,32 @@ function ProfileProducts({
 export function ProfilePage({
   profile,
   activeLeadCount,
+  plan,
+  planUpgrading,
   saving,
   saved,
   saveError,
   onSave,
+  onUpgradePro,
+  onDowngradeFree,
   onProductAdd,
   onProductRemove,
   onProductUpdate,
   onProductPatch,
+  onLogout,
   onProfileFieldChange,
 }: {
   profile: Profile;
   activeLeadCount: number;
+  plan: PlanContext | null;
+  planUpgrading?: boolean;
   saving: boolean;
   saved: boolean;
   saveError: string | null;
   onSave: () => void;
+  onLogout: () => void;
+  onUpgradePro: () => void;
+  onDowngradeFree?: () => void;
   onProductAdd: () => void;
   onProductRemove: (productId: string) => void;
   onProductUpdate: (productId: string, key: keyof ProducerProduct, value: string) => void;
@@ -122,6 +134,13 @@ export function ProfilePage({
           {saved ? <span className="text-sm font-medium text-[#405235]">Profil salvat cu succes.</span> : null}
           {saveError ? <span className="text-sm font-medium text-[#884636]">{saveError}</span> : null}
         </div>
+
+        <PlanSection
+          plan={plan}
+          upgrading={planUpgrading}
+          onUpgrade={onUpgradePro}
+          onDowngrade={onDowngradeFree}
+        />
 
         <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="space-y-4">
@@ -174,6 +193,8 @@ export function ProfilePage({
             />
           </div>
         </div>
+
+        <LogoutSection onLogout={onLogout} />
       </div>
     </ScrollArea>
   );

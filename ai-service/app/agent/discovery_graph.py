@@ -14,7 +14,7 @@ from app.gemini import (
     _filter_public_urls,
     _parse_buyer_item,
 )
-from app.geocode import geocode_business, haversine_km
+from app.geocode import geocode_business, geocode_city_center, haversine_km, infer_city_from_address
 from app.openrouter_client import chat_with_web
 from app.phone_util import validate_phone
 from app.taxonomy import needs_to_text
@@ -152,13 +152,16 @@ def extract_validate_node(state: DiscoveryState) -> dict:
         if _address_needs_enrichment(draft.address, state["locality"]):
             _enrich_buyer_details(draft, state["locality"])
 
+        city = draft.city or infer_city_from_address(draft.address) or state["locality"]
         geo = geocode_business(
             draft.name,
             draft.address,
-            draft.city or state["locality"],
+            city,
             fallback_lat=state["latitude"],
             fallback_lon=state["longitude"],
         )
+        if not geo:
+            geo = geocode_city_center(city)
         if not geo:
             logger.warning("Graph skip %s — geocode failed", draft.name)
             continue

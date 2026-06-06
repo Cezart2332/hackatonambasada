@@ -24,5 +24,11 @@ export function mapProducerMatchToDto(producer: MatchedProducer) {
     menuItems: producer.sell,
     supplyFrequency: producer.deliveryDays,
     notes: `Livrare până la ${Math.round(producer.rangeKm)} km`,
+    needs: producer.products.map((product) => product.name),
+    matchedNeeds: producer.matchedNeeds,
+    matchFactors: producer.matchFactors,
+    verified: producer.verified,
+    website: "",
+    sourceUrls: [],
   };
 }

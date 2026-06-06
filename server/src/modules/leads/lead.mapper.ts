@@ -1,6 +1,8 @@
 import type { Lead, LeadIcon, LeadStatus, LeadStatusRecord } from "@prisma/client";
+import type { PlanTier } from "../billing/plan.service.js";
 import type { AiDiscoveredLead } from "./lead.ai.js";
 import type { MatchedLead } from "./lead.matcher.js";
+import { buildStatusTimeline } from "./lead.stats.service.js";
 
 const statusToApi: Record<LeadStatus, string> = {
   BUN: "Bun",
@@ -78,6 +80,29 @@ export function mapLeadToDto(lead: MatchedLead) {
     tone: lead.tone,
     icon: lead.icon as LeadIcon,
     coordinates: [lead.latitude, lead.longitude] as [number, number],
+  };
+}
+
+export function mapLeadForPlan<T extends ReturnType<typeof mapDiscoveredLeadToDto>>(
+  lead: T,
+  tier: PlanTier,
+  status?: string | null,
+) {
+  if (tier !== "pro") {
+    return lead;
+  }
+
+  return {
+    ...lead,
+    proDetails: {
+      sourceUrls: lead.sourceUrls ?? [],
+      notes: lead.notes ?? "",
+      menuItems: lead.menuItems ?? "",
+      contactPerson: lead.contactPerson ?? "",
+      matchedNeeds: lead.matchedNeeds ?? [],
+      extendedReason: lead.reason,
+      statusTimeline: buildStatusTimeline(status),
+    },
   };
 }
 

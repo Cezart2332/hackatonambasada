@@ -208,6 +208,10 @@ def init_schema() -> None:
             _apply_cascade_fks(cur)
         conn.commit()
 
+    from app.db_suppliers import init_supplier_schema
+
+    init_supplier_schema()
+
 
 def _apply_cascade_fks(cur: psycopg.Cursor) -> None:
     """Ensure FK cascades so DBeaver/manual deletes clean up related AI rows."""
@@ -278,7 +282,7 @@ def area_has_geocoded_data(
     coord_buckets: set[tuple[float, float]] = set()
     in_range = 0
     for buyer in buyers:
-        if (buyer.get("geocode_status") or "unknown") != "verified":
+        if (buyer.get("geocode_status") or "unknown") not in {"verified", "city_center"}:
             continue
         lat = float(buyer["latitude"])
         lon = float(buyer["longitude"])
@@ -530,7 +534,7 @@ def search_buyers_by_vector(
                     1 - (embedding <=> %s::vector) AS similarity
                 FROM buyer_location
                 WHERE embedding IS NOT NULL
-                  AND geocode_status = 'verified'
+                  AND geocode_status IN ('verified', 'city_center')
                   AND latitude BETWEEN %s AND %s
                   AND longitude BETWEEN %s AND %s
                   {exclude_clause}
@@ -548,7 +552,7 @@ def list_buyers_in_area(area_key: str) -> list[dict[str, Any]]:
             cur.execute(
                 """
                 SELECT * FROM buyer_location WHERE area_key = %s
-                AND geocode_status = 'verified'
+                AND geocode_status IN ('verified', 'city_center')
                 ORDER BY updated_at DESC
                 """,
                 (area_key,),
@@ -586,7 +590,7 @@ def list_producer_buyers(producer_user_id: str) -> list[dict[str, Any]]:
                 FROM producer_buyer_interaction i
                 JOIN buyer_location b ON b.id = i.buyer_location_id
                 WHERE i.producer_user_id = %s
-                  AND b.geocode_status = 'verified'
+                  AND b.geocode_status IN ('verified', 'city_center')
                 ORDER BY i.updated_at DESC
                 """,
                 (producer_user_id,),

@@ -119,12 +119,10 @@ function AccountDetails({ registration }: { registration: AdminRegistration }) {
             Tip: {venueTypeLabels[registration.venue.venueType] || registration.venue.venueType}
           </p>
           <p className="mt-2 text-[#526047]">
-            <span className="font-semibold text-[#263421]">Caută:</span>{" "}
-            {registration.venue.productsNeeded || "—"}
+            Nevoi declarate în chat (sesiune, nepersistate în profil).
           </p>
-          <p className="mt-2 text-[#526047]">
-            Frecvență: {registration.venue.supplyFrequency || "—"} · livrare preferată:{" "}
-            {registration.venue.preferredDays || "—"}
+          <p className="mt-1 text-xs text-muted-foreground">
+            Produsele, cantitatea și zilele de livrare se colectează în Chat.
           </p>
         </div>
       ) : null}
@@ -386,7 +384,6 @@ export function AdminDashboardPage() {
         account.phone,
         account.location,
         account.producer?.products.map((product) => product.name).join(" "),
-        account.venue?.productsNeeded,
       ]
         .filter(Boolean)
         .join(" ")

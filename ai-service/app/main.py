@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.agent.chat_agent import run_chat_turn
+from app.agent.venue_chat_agent import run_venue_chat_turn
 from app.config import get_settings
 from app.db import close_pool, init_schema
 from app.gemini import embed
@@ -14,20 +15,30 @@ from app.models import (
     ChatReplyResponse,
     DiscoverLeadsRequest,
     DiscoverLeadsResponse,
+    DiscoverSuppliersRequest,
+    DiscoverSuppliersResponse,
     DiscoveredLead,
+    DiscoveredSupplier,
     EmbeddingRequest,
     EmbeddingResponse,
     HealthResponse,
     LeadEnrichRequest,
     LeadEnrichResponse,
     ListDiscoveredRequest,
+    ListDiscoveredSuppliersRequest,
     MessageDraftRequest,
     MessageDraftResponse,
     CampaignSimulateRequest,
     CampaignSimulateResponse,
     SimulatedStep,
+    SupplierStatusRequest,
 )
 from app.services.matching import discover_leads, list_discovered_leads, update_buyer_status
+from app.services.supplier_matching import (
+    discover_suppliers,
+    list_discovered_suppliers,
+    update_supplier_status,
+)
 from app.agent.outreach_agent import draft_outreach_message
 from app.agent.campaign_graph import DISCLAIMER, run_campaign_simulation
 
@@ -76,11 +87,19 @@ def chat_reply(body: ChatReplyRequest) -> ChatReplyResponse:
         if body.profile:
             profile_dict = body.profile.model_dump(exclude_none=True)
         try:
-            result = run_chat_turn(
-                user_id=body.userId,
-                message=body.message,
-                profile=profile_dict,
-            )
+            account_type = (body.accountType or "producer").strip().lower()
+            if account_type == "venue":
+                result = run_venue_chat_turn(
+                    user_id=body.userId,
+                    message=body.message,
+                    profile=profile_dict,
+                )
+            else:
+                result = run_chat_turn(
+                    user_id=body.userId,
+                    message=body.message,
+                    profile=profile_dict,
+                )
             return ChatReplyResponse(
                 reply=result.reply,
                 model=result.model,
@@ -119,6 +138,10 @@ def message_draft(body: MessageDraftRequest) -> MessageDraftResponse:
             product_summary=body.productSummary,
             locality=body.locality,
             tone=body.tone,
+            account_type=body.accountType,
+            venue_business_name=body.venueBusinessName,
+            supply_frequency=body.supplyFrequency,
+            preferred_days=body.preferredDays,
         )
         return MessageDraftResponse(message=message, model=settings.openrouter_model)
     except Exception as exc:
@@ -222,3 +245,52 @@ def leads_list(body: ListDiscoveredRequest) -> DiscoverLeadsResponse:
 @app.post("/v1/leads/status")
 def leads_status(body: BuyerStatusRequest) -> dict[str, str]:
     return update_buyer_status(body.userId, body.buyerId, body.status, body.reason)
+
+
+@app.post("/v1/suppliers/discover", response_model=DiscoverSuppliersResponse)
+def suppliers_discover(body: DiscoverSuppliersRequest) -> DiscoverSuppliersResponse:
+    try:
+        result = discover_suppliers(
+            user_id=body.userId,
+            products_needed=body.productsNeeded,
+            locality=body.locality,
+            latitude=body.latitude,
+            longitude=body.longitude,
+            range_km=body.rangeKm,
+            limit=body.limit,
+            force_refresh=body.forceRefresh,
+            venue_business_name=body.venueBusinessName,
+        )
+        return DiscoverSuppliersResponse(
+            producers=[DiscoveredSupplier(**producer) for producer in result["producers"]],
+            areaKey=result["areaKey"],
+            fromCache=result["fromCache"],
+            venueNeeds=result["venueNeeds"],
+        )
+    except Exception as exc:
+        logger.exception("Supplier discover failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Nu am putut descoperi producători acum.",
+        ) from exc
+
+
+@app.post("/v1/suppliers/list", response_model=DiscoverSuppliersResponse)
+def suppliers_list(body: ListDiscoveredSuppliersRequest) -> DiscoverSuppliersResponse:
+    producers = list_discovered_suppliers(
+        body.userId,
+        body.latitude,
+        body.longitude,
+        venue_business_name=body.venueBusinessName,
+    )
+    return DiscoverSuppliersResponse(
+        producers=[DiscoveredSupplier(**producer) for producer in producers],
+        areaKey="",
+        fromCache=True,
+        venueNeeds=[],
+    )
+
+
+@app.post("/v1/suppliers/status")
+def suppliers_status(body: SupplierStatusRequest) -> dict[str, str]:
+    return update_supplier_status(body.userId, body.supplierId, body.status, body.reason)

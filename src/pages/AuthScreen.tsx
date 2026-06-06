@@ -111,9 +111,6 @@ export function AuthScreen({
     venueType: "restaurant",
     phone: "",
     location: "",
-    productsNeeded: "",
-    supplyFrequency: "",
-    preferredDays: "",
   });
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
@@ -226,9 +223,6 @@ export function AuthScreen({
           businessName: venueSetup.businessName.trim(),
           phone: venueSetup.phone.trim(),
           location: venueSetup.location.trim(),
-          productsNeeded: venueSetup.productsNeeded.trim(),
-          supplyFrequency: venueSetup.supplyFrequency.trim(),
-          preferredDays: venueSetup.preferredDays.trim(),
         };
 
         await onRegister(email, registerPassword, "venue", setup);
@@ -249,7 +243,7 @@ export function AuthScreen({
           <AgentAvatar />
           <p className="mt-3 text-3xl font-extrabold text-[#263421]">Warm Leads</p>
           <p className="mt-2 text-sm leading-relaxed text-[#62705a]">
-            Conectăm producătorii locali cu restaurante și hoteluri din Dobrogea.
+            Spui ce cauți în chat → te legăm doar de producători verificați din Dobrogea → contact direct, fără marketplace complicat.
           </p>
         </div>
 
@@ -269,7 +263,7 @@ export function AuthScreen({
                     ? "Bine ai revenit — continuă cu recomandările și mesajele tale."
                     : isProducerRegister
                       ? "Înregistrare pentru fermieri și producători locali."
-                      : "Înregistrare pentru restaurante, hoteluri și magazine."}
+                      : "Pentru restaurante și hoteluri — nevoile le declari în chat după înregistrare."}
                 </CardDescription>
               </div>
             </CardHeader>
@@ -412,9 +406,6 @@ export function AuthScreen({
                                 lat: "44.1787",
                                 lon: "28.6538",
                               },
-                              productsNeeded: "miere de salcâm, brânzeturi locale, legume de sezon",
-                              supplyFrequency: "Săptămânal",
-                              preferredDays: "Marți și vineri dimineața",
                             });
                           } catch (error) {
                             setAuthError(
@@ -653,40 +644,9 @@ export function AuthScreen({
                           </div>
                         </section>
 
-                        <section className="space-y-4">
-                          <SectionLabel eyebrow="3" title="Ce cauți de la producători" />
-                          <FieldBlock label="Produse locale dorite">
-                            <div className="relative">
-                              <ShoppingBasket className="pointer-events-none absolute left-4 top-4 h-4 w-4 text-muted-foreground" />
-                              <textarea
-                                value={venueSetup.productsNeeded}
-                                onChange={(event) => updateVenueSetup("productsNeeded", event.target.value)}
-                                className={cn(selectClassName, "min-h-[96px] resize-y rounded-3xl py-3 pl-11")}
-                                placeholder="Ex: miere de salcâm, brânză de capră, legume de sezon, vin local"
-                              />
-                            </div>
-                          </FieldBlock>
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <FieldBlock label="Cât de des cumperi">
-                              <Input
-                                value={venueSetup.supplyFrequency}
-                                onChange={(event) => updateVenueSetup("supplyFrequency", event.target.value)}
-                                placeholder="Ex: săptămânal, de 2 ori pe lună"
-                              />
-                            </FieldBlock>
-                            <FieldBlock label="Zile bune pentru livrare">
-                              <div className="relative">
-                                <CalendarDays className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                <Input
-                                  value={venueSetup.preferredDays}
-                                  onChange={(event) => updateVenueSetup("preferredDays", event.target.value)}
-                                  className="pl-11"
-                                  placeholder="Ex: marți și vineri dimineața"
-                                />
-                              </div>
-                            </FieldBlock>
-                          </div>
-                        </section>
+                        <p className="rounded-2xl border border-[#c8d9aa] bg-[#f0f5e8] px-4 py-3 text-sm text-[#405235]">
+                          După înregistrare, spui în Chat ce produse cauți — acolo actualizezi nevoile și vezi producătorii potriviți.
+                        </p>
                       </>
                     )}
 

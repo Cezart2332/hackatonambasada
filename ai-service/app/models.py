@@ -26,6 +26,7 @@ class ChatReplyRequest(BaseModel):
     userId: str | None = None
     message: str | None = None
     profile: ChatProfileSnapshot | None = None
+    accountType: str | None = Field(default="producer", description="producer | venue")
     step: str | None = Field(default=None, description="Legacy onboarding step key")
     userAnswer: str | None = None
     profileHint: str | None = None
@@ -40,6 +41,10 @@ class MessageDraftRequest(BaseModel):
     website: str = ""
     menuItems: str = ""
     notes: str = ""
+    accountType: str = "producer"
+    venueBusinessName: str = ""
+    supplyFrequency: str = ""
+    preferredDays: str = ""
 
 
 class CampaignLeadInput(BaseModel):
@@ -174,5 +179,64 @@ class ListDiscoveredRequest(BaseModel):
 class BuyerStatusRequest(BaseModel):
     userId: str
     buyerId: str
+    status: str
+    reason: str | None = None
+
+
+class DiscoverSuppliersRequest(BaseModel):
+    userId: str
+    productsNeeded: list[str] = Field(default_factory=list)
+    locality: str = "Dobrogea"
+    latitude: float = 44.17
+    longitude: float = 28.63
+    rangeKm: float = 35
+    limit: int = 5
+    forceRefresh: bool = False
+    venueBusinessName: str = ""
+
+
+class DiscoveredSupplier(BaseModel):
+    id: str
+    name: str
+    type: str
+    location: str
+    distance: str
+    match: int
+    reason: str
+    sell: str
+    bestDay: str
+    contact: str
+    tone: str
+    icon: str
+    coordinates: list[float]
+    needs: list[str] = Field(default_factory=list)
+    matchedNeeds: list[str] = Field(default_factory=list)
+    website: str = ""
+    phone: str = ""
+    contactPerson: str = ""
+    menuItems: str = ""
+    notes: str = ""
+    sourceUrls: list[str] = Field(default_factory=list)
+    fromCache: bool = False
+    status: str | None = None
+
+
+class DiscoverSuppliersResponse(BaseModel):
+    producers: list[DiscoveredSupplier]
+    areaKey: str
+    fromCache: bool
+    venueNeeds: list[str] = Field(default_factory=list)
+
+
+class ListDiscoveredSuppliersRequest(BaseModel):
+    userId: str
+    latitude: float = 44.17
+    longitude: float = 28.63
+    venueBusinessName: str = ""
+
+
+class SupplierStatusRequest(BaseModel):
+    userId: str
+    supplierId: str
     status: str
     reason: str | None = None

@@ -13,6 +13,12 @@ venuesRouter.use(requireSession);
 venuesRouter.get("/me", controller.getMe);
 venuesRouter.put("/me", validate(updateVenueProfileSchema), controller.putMe);
 venuesRouter.get("/me/matched-producers", producersController.listMatchedProducers);
+venuesRouter.post("/me/matched-producers/refresh", producersController.refreshMatchedProducers);
+venuesRouter.post("/me/matched-producers/discover", producersController.discoverMatchedProducers);
+venuesRouter.post(
+  "/me/matched-producers/discover/more",
+  producersController.discoverMoreProducers,
+);
 venuesRouter.put(
   "/me/matched-producers/:producerUserId/status",
   validate(updateLeadStatusSchema),

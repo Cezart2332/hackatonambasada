@@ -10,9 +10,6 @@ export const updateVenueProfileSchema = z.object({
   locationChoice: z.string().optional().nullable(),
   latitude: z.number().optional().nullable(),
   longitude: z.number().optional().nullable(),
-  productsNeeded: z.string().optional(),
-  supplyFrequency: z.string().optional(),
-  preferredDays: z.string().optional(),
 });
 
 export type UpdateVenueProfileInput = z.infer<typeof updateVenueProfileSchema>;

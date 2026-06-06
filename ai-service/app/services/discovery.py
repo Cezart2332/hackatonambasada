@@ -25,7 +25,7 @@ def _persist_drafts(
     persisted = 0
 
     for draft in drafts:
-        if draft.geocode_status != "verified":
+        if draft.geocode_status not in {"verified", "city_center"}:
             logger.warning("Skipping %s — geocode was not verified", draft.name)
             continue
 

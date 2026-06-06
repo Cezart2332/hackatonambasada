@@ -26,9 +26,6 @@ export type AdminRegistrationDto = {
   };
   venue?: {
     venueType: string;
-    productsNeeded: string;
-    supplyFrequency: string;
-    preferredDays: string;
   };
 };
 
@@ -84,9 +81,6 @@ export function mapVenueRegistration(user: User, profile: VenueProfile): AdminRe
     updatedAt: profile.updatedAt.toISOString(),
     venue: {
       venueType: profile.venueType,
-      productsNeeded: profile.productsNeeded,
-      supplyFrequency: profile.supplyFrequency,
-      preferredDays: profile.preferredDays,
     },
   };
 }

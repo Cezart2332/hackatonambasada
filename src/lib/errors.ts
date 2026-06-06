@@ -66,11 +66,16 @@ const CODE_MESSAGES: Record<string, string> = {
   GEO_SEARCH_FAILED: "Căutarea localității nu a mers acum. Poți scrie localitatea manual.",
   INTERNAL_SERVER_ERROR: "Ceva nu a mers pe server. Încearcă din nou peste câteva secunde.",
   BAD_REQUEST: "Cererea nu a putut fi procesată. Verifică datele și încearcă din nou.",
+  PLAN_LIMIT_WEEKLY: "Ai folosit cele 3 recomandări din această săptămână. Revin luni sau treci la Pro.",
+  PLAN_LIMIT_ACTIVE: "Ai atins limita de lead-uri active. Marchează unele ca „Nu e potrivit” sau treci la Pro.",
+  PLAN_LIMIT_SIMULATION: "Ai folosit simularea gratuită din această săptămână. Treci la Pro pentru mai multe.",
+  PLAN_PRO_REQUIRED: "Această funcție este disponibilă în planul Pro.",
 };
 
 const STATUS_MESSAGES: Record<number, string> = {
   400: "Date invalide. Verifică ce ai completat.",
   401: "Email sau parolă greșită.",
+  402: "Limita planului gratuit a fost atinsă. Treci la Pro pentru mai multe.",
   403: "Nu ai acces la această acțiune.",
   404: "Nu am găsit resursa cerută.",
   422: "Verifică câmpurile marcate și încearcă din nou.",
@@ -153,6 +158,20 @@ export function messageFromUnknownError(error: unknown, fallback: string): strin
   }
 
   return fallback;
+}
+
+const PLAN_LIMIT_CODES = new Set([
+  "PLAN_LIMIT_WEEKLY",
+  "PLAN_LIMIT_ACTIVE",
+  "PLAN_LIMIT_SIMULATION",
+  "PLAN_PRO_REQUIRED",
+]);
+
+export function isPlanLimitError(error: unknown): error is ApiError {
+  return (
+    error instanceof ApiError &&
+    (error.status === 402 || (error.code != null && PLAN_LIMIT_CODES.has(error.code)))
+  );
 }
 
 export function messageFromAuthError(error: { message?: string; status?: number; code?: string } | null | undefined): string {

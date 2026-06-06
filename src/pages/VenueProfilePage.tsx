@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FieldBlock } from "@/components/FormBlocks";
+import { LogoutSection } from "@/components/LogoutSection";
 import type { Profile, VenueType } from "@/lib/types";
 
 const venueTypeOptions: Array<{ value: VenueType; label: string; icon: typeof Utensils }> = [
@@ -46,6 +47,7 @@ export function VenueProfilePage({
   saved,
   saveError,
   onSave,
+  onLogout,
   onProfileFieldChange,
 }: {
   profile: Profile;
@@ -54,8 +56,9 @@ export function VenueProfilePage({
   saved: boolean;
   saveError: string | null;
   onSave: () => void;
+  onLogout: () => void;
   onProfileFieldChange: (
-    key: "businessName" | "phone" | "location" | "product" | "quantity" | "days" | "venueType",
+    key: "businessName" | "phone" | "location" | "venueType",
     value: string,
   ) => void;
 }) {
@@ -72,7 +75,7 @@ export function VenueProfilePage({
             </Badge>
             <h1 className="text-2xl font-extrabold text-[#263421]">Profilul localului tău</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Actualizezi ce cauți și cum vrei să fii aprovizionat, pentru recomandări mai bune de producători.
+              Datele localului (nume, locație, contact). Ce produse cauți le spui în Chat — acolo se actualizează recomandările.
             </p>
           </div>
           <Badge variant="warm">{activeMatchCount} producători activi</Badge>
@@ -83,93 +86,73 @@ export function VenueProfilePage({
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
             {saving ? "Se salvează..." : "Salvează profilul"}
           </Button>
-          {saved ? <span className="text-sm font-medium text-[#405235]">Profil salvat cu succes.</span> : null}
+          {saved ? (
+            <span className="text-sm font-medium text-[#405235]">Profil salvat.</span>
+          ) : null}
           {saveError ? <span className="text-sm font-medium text-[#884636]">{saveError}</span> : null}
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[0.85fr_1.15fr]">
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
-              <p className="text-sm font-bold text-[#263421]">Date local</p>
-              <div className="mt-4 space-y-3">
-                <ProfileRow label="Local" value={profile.businessName} icon={Home} />
-                <ProfileRow label="Tip" value={venueTypeLabel} icon={Building2} />
-                <ProfileRow label="Telefon" value={profile.phone} icon={Phone} />
-                <ProfileRow label="Locație" value={profile.location} icon={MapPin} />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
-              <p className="text-sm font-bold text-[#263421]">Aprovizionare</p>
-              <div className="mt-4 space-y-3">
-                <FieldBlock label="Nume local">
-                  <Input
-                    value={profile.businessName || ""}
-                    onChange={(event) => onProfileFieldChange("businessName", event.target.value)}
-                    placeholder="Ex: Casa Dobrogeană"
-                  />
-                </FieldBlock>
-                <FieldBlock label="Tip local">
-                  <select
-                    value={profile.venueType || "restaurant"}
-                    onChange={(event) => onProfileFieldChange("venueType", event.target.value)}
-                    className="flex h-10 w-full rounded-md border border-input bg-white/90 px-3 py-2 text-sm"
-                  >
-                    {venueTypeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </FieldBlock>
-                <FieldBlock label="Telefon contact">
-                  <Input
-                    value={profile.phone || ""}
-                    onChange={(event) => onProfileFieldChange("phone", event.target.value)}
-                    placeholder="Ex: 07xx xxx xxx"
-                  />
-                </FieldBlock>
-                <FieldBlock label="Localitate">
-                  <Input
-                    value={profile.location || ""}
-                    onChange={(event) => onProfileFieldChange("location", event.target.value)}
-                    placeholder="Ex: Constanța"
-                  />
-                </FieldBlock>
-              </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
+            <p className="text-sm font-bold text-[#263421]">Date local</p>
+            <div className="mt-4 space-y-3">
+              <ProfileRow label="Local" value={profile.businessName} icon={Home} />
+              <ProfileRow label="Tip" value={venueTypeLabel} icon={Building2} />
+              <ProfileRow label="Telefon" value={profile.phone} icon={Phone} />
+              <ProfileRow label="Locație" value={profile.location} icon={MapPin} />
             </div>
           </div>
 
           <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
-            <p className="text-sm font-bold text-[#263421]">Ce cauți de la producători</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Cu cât ești mai specific, cu atât recomandările de producători sunt mai relevante.
-            </p>
+            <p className="text-sm font-bold text-[#263421]">Aprovizionare</p>
             <div className="mt-4 space-y-3">
-              <FieldBlock label="Produse necesare">
+              <FieldBlock label="Nume local">
                 <Input
-                  value={profile.product || ""}
-                  onChange={(event) => onProfileFieldChange("product", event.target.value)}
-                  placeholder="Ex: miere de salcâm, brânzeturi locale, legume de sezon"
+                  value={profile.businessName || ""}
+                  onChange={(event) => onProfileFieldChange("businessName", event.target.value)}
+                  placeholder="Ex: Casa Dobrogeană"
                 />
               </FieldBlock>
-              <FieldBlock label="Frecvență aprovizionare">
+              <FieldBlock label="Tip local">
+                <select
+                  value={profile.venueType || "restaurant"}
+                  onChange={(event) => onProfileFieldChange("venueType", event.target.value)}
+                  className="flex h-10 w-full rounded-md border border-input bg-white/90 px-3 py-2 text-sm"
+                >
+                  {venueTypeOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </FieldBlock>
+              <FieldBlock label="Telefon contact">
                 <Input
-                  value={profile.quantity || ""}
-                  onChange={(event) => onProfileFieldChange("quantity", event.target.value)}
-                  placeholder="Ex: săptămânal, bilunar"
+                  value={profile.phone || ""}
+                  onChange={(event) => onProfileFieldChange("phone", event.target.value)}
+                  placeholder="Ex: 07xx xxx xxx"
                 />
               </FieldBlock>
-              <FieldBlock label="Zile preferate pentru livrare">
+              <FieldBlock label="Localitate">
                 <Input
-                  value={profile.days || ""}
-                  onChange={(event) => onProfileFieldChange("days", event.target.value)}
-                  placeholder="Ex: marți și vineri dimineața"
+                  value={profile.location || ""}
+                  onChange={(event) => onProfileFieldChange("location", event.target.value)}
+                  placeholder="Ex: Constanța"
                 />
               </FieldBlock>
             </div>
           </div>
         </div>
+
+        <div className="rounded-2xl border border-[#c8d9aa] bg-[#f0f5e8] p-4">
+          <p className="text-sm font-bold text-[#263421]">Produse căutate — doar în Chat</p>
+          <p className="mt-1 text-sm text-[#5a654f]">
+            Nevoile nu se salvează în profil — le spui în Chat când ai nevoie (ex. „am nevoie de lapte și miere”)
+            și recomandările se actualizează pe loc.
+          </p>
+        </div>
+
+        <LogoutSection onLogout={onLogout} />
       </div>
     </ScrollArea>
   );

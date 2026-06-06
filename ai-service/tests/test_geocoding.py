@@ -196,6 +196,48 @@ class GeocodingTests(unittest.TestCase):
 
         self.assertEqual(result["validated"], [])
 
+    def test_city_center_fallback_is_used_when_business_geocode_fails(self) -> None:
+        item = {
+            "name": "Restaurant Local",
+            "type": "restaurant",
+            "address": "Constanța, România",
+            "city": "Constanța",
+            "needs": ["vegetables"],
+            "summary": "Restaurant local.",
+            "source_urls": ["https://example.com/restaurant-local"],
+        }
+        state = {
+            "locality": "Constanța",
+            "latitude": 44.17,
+            "longitude": 28.63,
+            "range_km": 35.0,
+            "producer_needs": ["vegetables"],
+            "exclude_names": [],
+            "avoid_labels": [],
+            "target_count": 3,
+            "attempts": 1,
+            "research_text": json.dumps([item]),
+            "citations": [],
+            "validated": [],
+            "seen_names": [],
+        }
+
+        city_result = GeocodeResult(
+            latitude=44.176,
+            longitude=28.653,
+            label="Constanța, România",
+            query="Constanța, Romania",
+            status="city_center",
+        )
+        with (
+            patch("app.agent.discovery_graph.geocode_business", return_value=None),
+            patch("app.agent.discovery_graph.geocode_city_center", return_value=city_result),
+        ):
+            result = discovery_graph.extract_validate_node(state)
+
+        self.assertEqual(len(result["validated"]), 1)
+        self.assertEqual(result["validated"][0].geocode_status, "city_center")
+
     def test_verified_geocode_metadata_is_passed_to_upsert(self) -> None:
         draft = BuyerDraft(
             name="Restaurant Verified",

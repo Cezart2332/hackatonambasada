@@ -47,9 +47,6 @@ export type VenueSetup = {
   phone: string;
   location: string;
   locationChoice?: LocationChoice;
-  productsNeeded: string;
-  supplyFrequency: string;
-  preferredDays: string;
 };
 
 export type ProducerSetup = {
@@ -87,6 +84,14 @@ export type Lead = {
   coordinates: [number, number];
   needs?: string[];
   matchedNeeds?: string[];
+  matchFactors?: {
+    productScore: number;
+    distanceKm: number;
+    producerRangeKm: number;
+    inRange: boolean;
+    proximityBonus: number;
+  };
+  verified?: boolean;
   website?: string;
   sourceUrls?: string[];
   phone?: string;
@@ -95,6 +100,54 @@ export type Lead = {
   supplyFrequency?: string;
   notes?: string;
   status?: LeadStatus | null;
+  proDetails?: {
+    sourceUrls: string[];
+    notes: string;
+    menuItems: string;
+    contactPerson: string;
+    matchedNeeds: string[];
+    extendedReason: string;
+    statusTimeline: Array<{ step: LeadStatus; reached: boolean; current: boolean }>;
+  };
+};
+
+export type PlanTier = "free" | "pro";
+
+export type PlanLimits = {
+  weeklyDiscoveries: number;
+  activeLeads: number;
+  weeklySimulations: number;
+  discoverMore: boolean;
+  stats: boolean;
+  richDetails: boolean;
+};
+
+export type PlanContext = {
+  tier: PlanTier;
+  limits: PlanLimits;
+  usage: {
+    weeklyDiscoveries: number;
+    weeklySimulations: number;
+    activeLeads: number;
+  };
+  weekKey: string;
+  resetsAt: string;
+  proActivatedAt: string | null;
+};
+
+export type LeadStats = {
+  pipeline: Record<string, number>;
+  weekly: {
+    discoveredThisWeek: number;
+    weeklyLimit: number | null;
+    activeLeads: number;
+    activeLimit: number;
+  };
+  matchQuality: {
+    averageMatch: number;
+    averageDistanceKm: number;
+    totalLeads: number;
+  };
 };
 
 export type ChatMessage =
@@ -114,7 +167,7 @@ export type ChatMessage =
     };
 
 export type AppScreen = "auth" | "producer-onboarding" | "pending-approval" | "chat";
-export type DashboardView = "chat" | "map" | "profile";
+export type DashboardView = "chat" | "director" | "profile";
 
 export type SimulatedCampaignStep = {
   leadId: string;

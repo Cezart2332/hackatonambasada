@@ -19,6 +19,11 @@ enum ApprovalStatus {
   REJECTED
 }
 
+enum SubscriptionTier {
+  FREE
+  PRO
+}
+
 model User {
   id              String           @id @default(cuid())
   name            String
@@ -34,6 +39,7 @@ model User {
   venueProfile              VenueProfile?
   leadStatuses              LeadStatusRecord[]
   producerMatchStatuses     ProducerMatchStatusRecord[]
+  usageQuotas               UsageQuota[]
 
   @@map("user")
 }
@@ -110,13 +116,29 @@ model ProducerProfile {
   longitude      Float?
   rangeKm        Float             @default(35)
   deliveryDays   String            @default("")
-  extraDetails   String            @default("")
-  approvalStatus ApprovalStatus    @default(PENDING)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  products       ProducerProduct[]
+  extraDetails       String            @default("")
+  approvalStatus     ApprovalStatus    @default(PENDING)
+  subscriptionTier   SubscriptionTier  @default(FREE)
+  proActivatedAt     DateTime?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  products           ProducerProduct[]
 
   @@map("producer_profile")
+}
+
+model UsageQuota {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekKey     String
+  discoveries Int      @default(0)
+  simulations Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, weekKey])
+  @@map("usage_quota")
 }
 
 model VenueProfile {
@@ -130,9 +152,6 @@ model VenueProfile {
   locationChoice  String?
   latitude        Float?
   longitude       Float?
-  productsNeeded  String   @default("")
-  supplyFrequency String   @default("")
-  preferredDays   String         @default("")
   approvalStatus  ApprovalStatus @default(PENDING)
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt

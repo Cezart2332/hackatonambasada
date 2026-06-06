@@ -15,6 +15,7 @@ leadsRouter.post(
   validate(campaignSimulateSchema),
   controller.simulateCampaign,
 );
+leadsRouter.get("/stats", controller.getLeadStats);
 leadsRouter.get("/", controller.listLeads);
 leadsRouter.get("/:id", controller.getLead);
 leadsRouter.put(

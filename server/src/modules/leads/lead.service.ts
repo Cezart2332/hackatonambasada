@@ -1,6 +1,14 @@
 import { prisma } from "../../shared/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
 import {
+  assertCanDiscover,
+  assertCanSimulate,
+  discoveryLimitForPlan,
+  getPlanContext,
+  recordDiscovery,
+  recordSimulation,
+} from "../billing/plan.service.js";
+import {
   discoverLeads,
   isBuyerLeadId,
   listDiscoveredLeads,
@@ -9,6 +17,7 @@ import {
 } from "./lead.ai.js";
 import {
   mapDiscoveredLeadToDto,
+  mapLeadForPlan,
 } from "./lead.mapper.js";
 import type { CampaignSimulateInput, MatchLeadsInput } from "./lead.schema.js";
 
@@ -63,43 +72,86 @@ async function discoverAiLeads(
   return discovered.map(mapDiscoveredLeadToDto);
 }
 
-export async function matchForUser(userId: string, input: MatchLeadsInput = {}) {
-  const aiLeads = await discoverAiLeads(userId, input);
+export async function matchForUser(
+  userId: string,
+  input: MatchLeadsInput = {},
+  accountType?: string,
+) {
+  const ctx = await assertCanDiscover(userId, { accountType });
+  const limit = discoveryLimitForPlan(ctx);
+  if (limit <= 0) {
+    return [];
+  }
+
+  const aiLeads = await discoverAiLeads(userId, { ...input, limit });
   if (aiLeads?.length) {
+    if (accountType !== "VENUE" && accountType !== "venue") {
+      await recordDiscovery(userId);
+    }
     return aiLeads;
   }
 
   return [];
 }
 
-export async function matchMoreForUser(userId: string, input: MatchLeadsInput = {}) {
-  const aiLeads = await discoverAiLeads(userId, input, { discoverMore: true });
+export async function matchMoreForUser(
+  userId: string,
+  input: MatchLeadsInput = {},
+  accountType?: string,
+) {
+  const ctx = await assertCanDiscover(userId, { discoverMore: true, accountType });
+  const limit = discoveryLimitForPlan(ctx);
+  if (limit <= 0) {
+    return [];
+  }
+
+  const aiLeads = await discoverAiLeads(userId, { ...input, limit }, { discoverMore: true });
   if (aiLeads?.length) {
+    if (accountType !== "VENUE" && accountType !== "venue") {
+      await recordDiscovery(userId);
+    }
     return aiLeads;
   }
 
   return [];
 }
 
-export async function listLeadsForUser(userId: string) {
+export async function listLeadsForUser(userId: string, accountType?: string) {
   const profile = await getProfileContext(userId);
   const latitude = profile.latitude ?? DEFAULT_LAT;
   const longitude = profile.longitude ?? DEFAULT_LON;
+  const plan = await getPlanContext(userId, accountType);
 
   const aiListed = await listDiscoveredLeads(userId, latitude, longitude);
   if (aiListed?.length) {
-    return aiListed.map((lead) => ({
-      ...mapDiscoveredLeadToDto(lead),
-      status: lead.status ?? null,
-    }));
+    return aiListed.map((lead) =>
+      mapLeadForPlan(
+        {
+          ...mapDiscoveredLeadToDto(lead),
+          status: lead.status ?? null,
+        },
+        plan.tier,
+        lead.status,
+      ),
+    );
+  }
+
+  try {
+    const discovered = await matchForUser(userId, {}, accountType);
+    if (discovered?.length) {
+      return discovered.map((lead) => ({ ...lead, status: null }));
+    }
+  } catch {
+    return [];
   }
 
   return [];
 }
 
-export async function getLeadById(userId: string, leadId: string) {
+export async function getLeadById(userId: string, leadId: string, accountType?: string) {
   if (isBuyerLeadId(leadId)) {
     const profile = await getProfileContext(userId);
+    const plan = await getPlanContext(userId, accountType);
     const listed = await listDiscoveredLeads(
       userId,
       profile.latitude ?? DEFAULT_LAT,
@@ -107,10 +159,14 @@ export async function getLeadById(userId: string, leadId: string) {
     );
     const found = listed?.find((l) => l.id === leadId);
     if (found) {
-      return {
-        ...mapDiscoveredLeadToDto(found),
-        status: found.status ?? null,
-      };
+      return mapLeadForPlan(
+        {
+          ...mapDiscoveredLeadToDto(found),
+          status: found.status ?? null,
+        },
+        plan.tier,
+        found.status,
+      );
     }
     throw new AppError("Lead not found", 404, "NOT_FOUND");
   }
@@ -121,9 +177,20 @@ export async function getLeadById(userId: string, leadId: string) {
 export async function simulateCampaignForUser(
   userId: string,
   input: CampaignSimulateInput = {},
+  accountType?: string,
 ) {
+  if (accountType === "venue" || accountType === "VENUE") {
+    throw new AppError(
+      "Simularea campaniei este disponibilă doar pentru producători.",
+      403,
+      "VENUE_NOT_SUPPORTED",
+    );
+  }
+
+  await assertCanSimulate(userId, accountType);
+
   const profile = await getProfileContext(userId);
-  const allLeads = await listLeadsForUser(userId);
+  const allLeads = await listLeadsForUser(userId, accountType);
   const maxLeads = input.maxLeads ?? 5;
 
   let selected = allLeads.filter((lead) => lead.status !== "Nu e potrivit");
@@ -164,6 +231,10 @@ export async function simulateCampaignForUser(
 
   if (!result) {
     throw new AppError("Simularea campaniei a eșuat.", 502, "AI_SIMULATE_FAILED");
+  }
+
+  if (accountType !== "VENUE" && accountType !== "venue") {
+    await recordSimulation(userId);
   }
 
   return result;

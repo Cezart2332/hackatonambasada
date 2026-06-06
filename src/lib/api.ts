@@ -1,11 +1,14 @@
 import { API_BASE } from "./config";
+import type { VenueMatchDiagnostics } from "./venueChatUtils";
 import { ApiError, messageFromApiResponse, messageFromUnknownError } from "./errors";
 import { formatAvailableFromDisplay } from "./availableFrom";
 import { getPackagingLabel, getPriceUnitShort, normalizeLegacyProduct } from "./productCatalog";
 import type {
   AccountType,
   Lead,
+  LeadStats,
   LeadStatus,
+  PlanContext,
   ProducerProduct,
   ProducerSetup,
   Profile,
@@ -48,9 +51,6 @@ export type ApiVenueProfile = {
   locationChoice: string | null;
   latitude: number | null;
   longitude: number | null;
-  productsNeeded: string;
-  supplyFrequency: string;
-  preferredDays: string;
   approvalStatus: "pending" | "approved" | "rejected";
 };
 
@@ -85,9 +85,7 @@ export type AdminRegistration = {
   };
   venue?: {
     venueType: string;
-    productsNeeded: string;
-    supplyFrequency: string;
-    preferredDays: string;
+
   };
 };
 
@@ -203,9 +201,6 @@ export function setupVenueToApiPayload(setup: VenueSetup) {
     locationChoice: locationChoice?.label ?? null,
     latitude: locationChoice?.lat ? Number.parseFloat(locationChoice.lat) : null,
     longitude: locationChoice?.lon ? Number.parseFloat(locationChoice.lon) : null,
-    productsNeeded: setup.productsNeeded,
-    supplyFrequency: setup.supplyFrequency,
-    preferredDays: setup.preferredDays,
   };
 }
 
@@ -218,7 +213,6 @@ export function apiVenueProfileToFrontend(
     businessName: dto.businessName,
     phone: dto.phone,
     venueType: dto.venueType as Profile["venueType"],
-    product: dto.productsNeeded,
     location: dto.location,
     locationChoice:
       dto.latitude != null && dto.longitude != null
@@ -228,8 +222,6 @@ export function apiVenueProfileToFrontend(
             lon: String(dto.longitude),
           }
         : undefined,
-    days: dto.preferredDays,
-    quantity: dto.supplyFrequency,
   };
 }
 
@@ -282,6 +274,22 @@ export function apiProfileToFrontend(
 export const api = {
   getAccount: () => apiFetch<ApiAccount>("/api/account/me"),
 
+  getPlan: () => apiFetch<{ plan: PlanContext }>("/api/account/plan"),
+
+  upgradePro: () =>
+    apiFetch<{ plan: PlanContext }>("/api/account/upgrade-pro", {
+      method: "POST",
+      body: "{}",
+    }),
+
+  downgradeFree: () =>
+    apiFetch<{ plan: PlanContext }>("/api/account/downgrade-free", {
+      method: "POST",
+      body: "{}",
+    }),
+
+  getLeadStats: () => apiFetch<{ stats: LeadStats }>("/api/leads/stats"),
+
   getProfile: () => apiFetch<ApiProfile>("/api/producers/me"),
 
   updateProfile: (payload: ReturnType<typeof setupToApiPayload>) =>
@@ -333,10 +341,33 @@ export const api = {
       LEAD_DISCOVERY_TIMEOUT_MS,
     ),
 
-  listMatchedProducers: () =>
-    apiFetch<{ producers: Array<Lead & { status?: LeadStatus | null }> }>(
-      "/api/venues/me/matched-producers",
-    ),
+  listMatchedProducers: (scope: "matched" | "all" = "matched", productsNeeded?: string) => {
+    const params = new URLSearchParams({ scope });
+    if (productsNeeded?.trim()) params.set("productsNeeded", productsNeeded.trim());
+    return apiFetch<{
+      producers: Array<Lead & { status?: LeadStatus | null }>;
+      diagnostics?: VenueMatchDiagnostics;
+    }>(`/api/venues/me/matched-producers?${params.toString()}`);
+  },
+
+  refreshMatchedProducers: (productsNeeded?: string) =>
+    apiFetch<{ producers: Lead[]; diagnostics?: VenueMatchDiagnostics }>("/api/venues/me/matched-producers/refresh", {
+      method: "POST",
+      body: JSON.stringify(
+        productsNeeded?.trim() ? { productsNeeded: productsNeeded.trim() } : {},
+      ),
+    }),
+
+  /** @deprecated Use refreshMatchedProducers */
+  discoverMatchedProducers: () =>
+    apiFetch<{ producers: Lead[] }>("/api/venues/me/matched-producers/refresh", {
+      method: "POST",
+      body: "{}",
+    }),
+
+  /** @deprecated Use listMatchedProducers('all') */
+  discoverMoreProducers: () =>
+    apiFetch<{ producers: Lead[] }>("/api/venues/me/matched-producers?scope=all"),
 
   updateProducerMatchStatus: (producerUserId: string, status: LeadStatus) =>
     apiFetch<{ producerUserId: string; status: LeadStatus }>(
@@ -362,6 +393,7 @@ export const api = {
   chatReply: (payload: {
     userId: string;
     message: string;
+    accountType?: "producer" | "venue";
     profile?: {
       product?: string;
       quantity?: string;
@@ -383,7 +415,7 @@ export const api = {
     }>("/api/ai/v1/chat/reply", {
       method: "POST",
       body: JSON.stringify(payload),
-    }),
+    }, LEAD_DISCOVERY_TIMEOUT_MS),
 
   draftMessage: (payload: {
     businessName: string;
@@ -394,6 +426,10 @@ export const api = {
     website?: string;
     menuItems?: string;
     notes?: string;
+    accountType?: "venue" | "producer";
+    venueBusinessName?: string;
+    supplyFrequency?: string;
+    preferredDays?: string;
   }) =>
     apiFetch<{ message: string }>("/api/ai/v1/messages/draft", {
       method: "POST",
@@ -406,6 +442,10 @@ export const api = {
         website: payload.website ?? "",
         menuItems: payload.menuItems ?? "",
         notes: payload.notes ?? "",
+        accountType: payload.accountType ?? "producer",
+        venueBusinessName: payload.venueBusinessName ?? "",
+        supplyFrequency: payload.supplyFrequency ?? "",
+        preferredDays: payload.preferredDays ?? "",
       }),
     }),
 
@@ -438,19 +478,4 @@ export const api = {
       },
     ),
 
-  enrichLead: (payload: { leadName: string; leadType?: string; productSummary?: string }) =>
-    apiFetch<{
-      reason: string;
-      suggestedPitch: string;
-      bestDay: string;
-      tone: string;
-      matchScore: number;
-    }>("/api/ai/v1/leads/enrich", {
-      method: "POST",
-      body: JSON.stringify({
-        leadName: payload.leadName,
-        leadType: payload.leadType ?? "",
-        productSummary: payload.productSummary ?? "",
-      }),
-    }),
 };

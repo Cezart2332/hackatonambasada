@@ -1,5 +1,5 @@
-import React, { type ComponentType } from "react";
-import { CircleMarker, MapContainer, Popup, TileLayer } from "react-leaflet";
+import React, { useEffect, type ComponentType } from "react";
+import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import {
   Navigation,
@@ -18,10 +18,118 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { MatchWhySection } from "@/components/MatchWhySection";
 import type { Lead, LeadStatus } from "@/lib/types";
+
+const feedbackOptions: LeadStatus[] = ["Bun", "Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
 
 const LeafletMapContainer = MapContainer as unknown as ComponentType<Record<string, unknown>>;
 const LeafletCircleMarker = CircleMarker as unknown as ComponentType<Record<string, unknown>>;
+
+function MapResizeHandler({ active }: { active?: boolean }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (active === false) return;
+
+    const fix = () => {
+      map.invalidateSize({ animate: false });
+    };
+
+    fix();
+    const timers = [0, 100, 350].map((ms) => window.setTimeout(fix, ms));
+    const parent = map.getContainer().parentElement;
+    const observer = parent ? new ResizeObserver(fix) : null;
+    observer?.observe(parent);
+    window.addEventListener("resize", fix);
+
+    return () => {
+      timers.forEach((id) => window.clearTimeout(id));
+      observer?.disconnect();
+      window.removeEventListener("resize", fix);
+    };
+  }, [map, active]);
+
+  return null;
+}
+
+function FitMapBounds({ leads }: { leads: Lead[] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!leads.length) return;
+    const lats = leads.map((lead) => lead.coordinates[0]);
+    const lngs = leads.map((lead) => lead.coordinates[1]);
+    const padding = 0.12;
+    const latSpan = Math.max(...lats) - Math.min(...lats);
+    const lngSpan = Math.max(...lngs) - Math.min(...lngs);
+    map.fitBounds(
+      [
+        [Math.min(...lats) - latSpan * padding, Math.min(...lngs) - lngSpan * padding],
+        [Math.max(...lats) + latSpan * padding, Math.max(...lngs) + lngSpan * padding],
+      ],
+      { animate: false },
+    );
+  }, [map, leads]);
+
+  return null;
+}
+
+function LeadsMap({
+  leads,
+  statuses,
+  onMessage,
+  active = true,
+}: {
+  leads: Lead[];
+  statuses: Record<string, LeadStatus>;
+  onMessage: (lead: Lead) => void;
+  active?: boolean;
+}) {
+  return (
+    <LeafletMapContainer
+      center={[44.13, 28.62]}
+      zoom={9}
+      scrollWheelZoom
+      className="h-full w-full min-h-[240px]"
+      attributionControl={false}
+    >
+      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <MapResizeHandler active={active} />
+      <FitMapBounds leads={leads} />
+      {leads.map((lead) => (
+        <LeafletCircleMarker
+          key={lead.id}
+          center={lead.coordinates}
+          radius={statuses[lead.id] === "Nu e potrivit" ? 7 : 10}
+          pathOptions={{
+            color: statuses[lead.id] === "Nu e potrivit" ? "#9a7768" : "#4d6638",
+            fillColor: statuses[lead.id] === "Contactat" ? "#e3a72f" : "#6d823c",
+            fillOpacity: 0.88,
+            weight: 2,
+          }}
+        >
+          <Popup>
+            <div className="min-w-[210px] space-y-2">
+              <p className="font-bold text-[#263421]">{lead.name}</p>
+              <p className="text-sm text-[#5a654f]">{lead.type}</p>
+              <p className="text-sm font-semibold text-[#526b36]">
+                {lead.match}% potrivire · {lead.distance}
+              </p>
+              <button
+                type="button"
+                className="rounded-full bg-[#4d6638] px-3 py-1.5 text-xs font-bold text-white"
+                onClick={() => onMessage(lead)}
+              >
+                Scrie mesaj
+              </button>
+            </div>
+          </Popup>
+        </LeafletCircleMarker>
+      ))}
+    </LeafletMapContainer>
+  );
+}
 
 function leadIcon(icon: Lead["icon"]) {
   const icons = {
@@ -56,6 +164,7 @@ export function MapLeadRow({
   onStatus,
   onWhatsAppClick,
   onFailedClick,
+  isVenue = false,
 }: {
   lead: Lead;
   status?: LeadStatus;
@@ -65,12 +174,13 @@ export function MapLeadRow({
   onStatus: (lead: Lead, status: LeadStatus) => void;
   onWhatsAppClick: (lead: Lead) => void;
   onFailedClick: (lead: Lead) => void;
+  isVenue?: boolean;
 }) {
   const Icon = leadIcon(lead.icon);
 
   return (
     <div className={cn(
-      "rounded-2xl border p-3 transition-colors",
+      "w-full rounded-2xl border p-3 transition-colors",
       failedFeedback ? "border-[#ead2cc] bg-[#fffcfb]" : "border-[#ded5bf] bg-[#fffdf7]"
     )}>
       <div className="flex gap-3">
@@ -80,7 +190,16 @@ export function MapLeadRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="truncate text-sm font-extrabold text-[#263421]">{lead.name}</p>
+              <div className="flex flex-wrap items-center gap-1">
+                <p className="truncate text-sm font-extrabold text-[#263421]">{lead.name}</p>
+                {lead.verified ? <Badge variant="olive" className="shrink-0 text-[10px]">Verificat</Badge> : null}
+                {lead.match >= 85 ? <Badge variant="warm" className="shrink-0 text-[10px]">Top</Badge> : null}
+                {lead.matchFactors ? (
+                  <Badge variant={lead.matchFactors.inRange ? "olive" : "outline"} className="shrink-0 text-[10px]">
+                    {lead.matchFactors.inRange ? "În raza ta" : "În afara razei"}
+                  </Badge>
+                ) : null}
+              </div>
               <p className="truncate text-xs text-muted-foreground">{lead.location}</p>
             </div>
             <Badge variant="blue" className="shrink-0">
@@ -95,7 +214,7 @@ export function MapLeadRow({
           ) : null}
 
           <p className="mt-2 line-clamp-2 text-xs text-[#5a654f]">
-            Îl recomand pentru că {lead.reason}
+{isVenue ? "Recomand pentru că" : "Îl recomand pentru că"} {lead.reason}
           </p>
 
           {failedFeedback ? (
@@ -104,6 +223,12 @@ export function MapLeadRow({
               <span>Contact eșuat: {failedFeedback}</span>
             </div>
           ) : null}
+
+          <p className="mt-2 line-clamp-2 text-xs text-[#5a654f]">
+            <span className="font-bold">{isVenue ? "Oferă:" : "Ai putea să-i vinzi:"}</span> {lead.sell}
+          </p>
+
+          {isVenue ? <div className="mt-2"><MatchWhySection lead={lead} isVenue /></div> : null}
 
           {status ? (
             <div className="mt-2">
@@ -114,10 +239,10 @@ export function MapLeadRow({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => onDetails(lead)}>
+        <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={() => onDetails(lead)}>
           Detalii
         </Button>
-        <Button type="button" variant="honey" size="sm" onClick={() => onMessage(lead)}>
+        <Button type="button" variant="honey" size="sm" className="min-h-11" onClick={() => onMessage(lead)}>
           Mesaj
         </Button>
         <Button
@@ -133,13 +258,76 @@ export function MapLeadRow({
           type="button"
           variant="outline"
           size="sm"
+          className="min-h-11 text-rose-700 hover:bg-rose-50 border-rose-200 hover:border-rose-300"
           onClick={() => onFailedClick(lead)}
-          className="text-rose-700 hover:bg-rose-50 border-rose-200 hover:border-rose-300"
         >
           Ceva n-a mers
         </Button>
       </div>
+
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {feedbackOptions.map((option) => (
+          <Button
+            key={option}
+            type="button"
+            size="sm"
+            variant={status === option ? "default" : "chip"}
+            className="h-8"
+            onClick={() => onStatus(lead, option)}
+          >
+            {option}
+          </Button>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function LeadsList({
+  leads,
+  statuses,
+  failedFeedbacks,
+  onDetails,
+  onMessage,
+  onStatus,
+  onWhatsAppClick,
+  onFailedClick,
+  isVenue = false,
+}: {
+  leads: Lead[];
+  statuses: Record<string, LeadStatus>;
+  failedFeedbacks: Record<string, string>;
+  onDetails: (lead: Lead) => void;
+  onMessage: (lead: Lead) => void;
+  onStatus: (lead: Lead, status: LeadStatus) => void;
+  onWhatsAppClick: (lead: Lead) => void;
+  onFailedClick: (lead: Lead) => void;
+  isVenue?: boolean;
+}) {
+  return (
+    <ScrollArea className="h-full min-h-0">
+      <div className="mx-auto flex w-full max-w-full flex-col gap-2 px-4 py-3">
+        {leads.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            Niciun lead nu trece filtrele selectate.
+          </p>
+        ) : null}
+        {leads.map((lead) => (
+          <MapLeadRow
+            key={lead.id}
+            lead={lead}
+            status={statuses[lead.id]}
+            failedFeedback={failedFeedbacks[lead.id]}
+            onDetails={onDetails}
+            onMessage={onMessage}
+            onStatus={onStatus}
+            onWhatsAppClick={onWhatsAppClick}
+            onFailedClick={onFailedClick}
+            isVenue={isVenue}
+          />
+        ))}
+      </div>
+    </ScrollArea>
   );
 }
 
@@ -156,6 +344,10 @@ export function LeadMapPanel({
   onWhatsAppClick,
   onFailedClick,
   isVenue = false,
+  embedded = false,
+  layout = "stack",
+  mobilePanel = "list",
+  mapActive = true,
 }: {
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
@@ -169,7 +361,70 @@ export function LeadMapPanel({
   onWhatsAppClick: (lead: Lead) => void;
   onFailedClick: (lead: Lead) => void;
   isVenue?: boolean;
+  embedded?: boolean;
+  layout?: "stack" | "split";
+  mobilePanel?: "list" | "map";
+  mapActive?: boolean;
 }) {
+  const list = (
+    <LeadsList
+      leads={leads}
+      statuses={statuses}
+      failedFeedbacks={failedFeedbacks}
+      onDetails={onDetails}
+      onMessage={onMessage}
+      onStatus={onStatus}
+      onWhatsAppClick={onWhatsAppClick}
+      onFailedClick={onFailedClick}
+      isVenue={isVenue}
+    />
+  );
+
+  const map = (
+    <div className="relative h-full min-h-0 w-full overflow-hidden bg-[#e8e4da]">
+      {mapActive ? (
+        <LeadsMap leads={leads} statuses={statuses} onMessage={onMessage} active={mapActive} />
+      ) : null}
+    </div>
+  );
+
+  const mapAndList =
+    layout === "split" ? (
+      <div className="flex h-full min-h-0 w-full flex-col lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,42%)]">
+        <div
+          className={cn(
+            "min-h-0 overflow-hidden border-[#d7ccb3] lg:border-r",
+            mobilePanel === "list" ? "flex flex-1 flex-col" : "hidden lg:flex lg:flex-col",
+          )}
+        >
+          {list}
+        </div>
+        <div
+          className={cn(
+            "min-h-0 overflow-hidden",
+            mobilePanel === "map" ? "flex flex-1 flex-col" : "hidden lg:flex lg:flex-col",
+          )}
+        >
+          {map}
+        </div>
+      </div>
+    ) : (
+      <>
+        <div className="h-[280px] shrink-0 border-b border-[#d7ccb3]">
+          {mapActive ? map : null}
+        </div>
+        {list}
+      </>
+    );
+
+  if (embedded) {
+    return (
+      <div className="flex min-h-0 flex-1 w-full flex-col overflow-hidden bg-[#fbf7ed]">
+        {mapAndList}
+      </div>
+    );
+  }
+
   return (
     <aside className="flex h-full min-h-0 w-full flex-col bg-[#fbf7ed]">
       <div className="shrink-0 border-b border-[#d7ccb3] px-4 py-3">
@@ -202,70 +457,11 @@ export function LeadMapPanel({
             ) : (
               <Search className="h-4 w-4" />
             )}
-            Caută alte lead-uri
+            {isVenue ? "Vezi toți producătorii" : "Caută alte lead-uri"}
           </Button>
         ) : null}
       </div>
-
-      <div className="h-[280px] shrink-0 border-b border-[#d7ccb3] lg:h-[42%]">
-        <LeafletMapContainer
-          center={[44.13, 28.62]}
-          zoom={9}
-          scrollWheelZoom={false}
-          className="h-full w-full"
-          attributionControl={false}
-        >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-          {leads.map((lead) => (
-            <LeafletCircleMarker
-              key={lead.id}
-              center={lead.coordinates}
-              radius={statuses[lead.id] === "Nu e potrivit" ? 7 : 10}
-              pathOptions={{
-                color: statuses[lead.id] === "Nu e potrivit" ? "#9a7768" : "#4d6638",
-                fillColor: statuses[lead.id] === "Contactat" ? "#e3a72f" : "#6d823c",
-                fillOpacity: 0.88,
-                weight: 2,
-              }}
-            >
-              <Popup>
-                <div className="min-w-[210px] space-y-2">
-                  <p className="font-bold text-[#263421]">{lead.name}</p>
-                  <p className="text-sm text-[#5a654f]">{lead.type}</p>
-                  <p className="text-sm font-semibold text-[#526b36]">
-                    {lead.match}% potrivire · {lead.distance}
-                  </p>
-                  <button
-                    type="button"
-                    className="rounded-full bg-[#4d6638] px-3 py-1.5 text-xs font-bold text-white"
-                    onClick={() => onMessage(lead)}
-                  >
-                    Scrie mesaj
-                  </button>
-                </div>
-              </Popup>
-            </LeafletCircleMarker>
-          ))}
-        </LeafletMapContainer>
-      </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="space-y-2 p-3">
-          {leads.map((lead) => (
-            <MapLeadRow
-              key={lead.id}
-              lead={lead}
-              status={statuses[lead.id]}
-              failedFeedback={failedFeedbacks[lead.id]}
-              onDetails={onDetails}
-              onMessage={onMessage}
-              onStatus={onStatus}
-              onWhatsAppClick={onWhatsAppClick}
-              onFailedClick={onFailedClick}
-            />
-          ))}
-        </div>
-      </ScrollArea>
+      {mapAndList}
     </aside>
   );
 }

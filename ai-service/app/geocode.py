@@ -398,3 +398,52 @@ def geocode_business(
         queries,
     )
     return None
+
+
+def geocode_city_center(locality: str) -> GeocodeResult | None:
+    """Fallback: pin a business to its town/municipality center when POI geocode fails."""
+    city = _clean_locality(locality)
+    if not city:
+        return None
+
+    query = f"{city}, Romania"
+    result = geocode_query(query, locality=city)
+    if result:
+        return GeocodeResult(
+            latitude=result.latitude,
+            longitude=result.longitude,
+            label=result.label,
+            query=result.query,
+            provider=result.provider,
+            status="city_center",
+        )
+
+    if _nominatim_is_blocked():
+        return None
+
+    try:
+        with httpx.Client() as client:
+            results = _nominatim_search(client, query)
+    except Exception as exc:
+        logger.warning("City geocode failed for %r: %s", city, exc)
+        return None
+
+    if not results:
+        return None
+
+    for item in results:
+        try:
+            lat = float(item["lat"])
+            lon = float(item["lon"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if 43.5 <= lat <= 45.5 and 27.0 <= lon <= 30.0:
+            label = str(item.get("display_name") or query)
+            return GeocodeResult(
+                latitude=lat,
+                longitude=lon,
+                label=label,
+                query=query,
+                status="city_center",
+            )
+    return None

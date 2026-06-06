@@ -14,6 +14,7 @@ import {
   Handshake,
   Home,
   KeyRound,
+  LayoutGrid,
   Leaf,
   Loader2,
   LockKeyhole,
@@ -57,7 +58,18 @@ import {
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { VenueChatProgress } from "@/components/VenueChatProgress";
+import { MatchWhySection } from "@/components/MatchWhySection";
+import { useVenueChatSession } from "@/hooks/useVenueChatSession";
 import { cn } from "@/lib/utils";
+import {
+  buildVenueZeroMatchMessage,
+  extractVenueNeedsFromMessage,
+  isVenueReadyForMatching,
+  mergeVenueProductNeeds,
+  venueLeadsFromChat,
+  venueProfileToChatSnapshot,
+} from "@/lib/venueChatUtils";
 import { authClient } from "@/lib/auth-client";
 import {
   api,
@@ -68,7 +80,7 @@ import {
   setupVenueToApiPayload,
   summarizeProducts,
 } from "@/lib/api";
-import { messageFromAuthError, messageFromUnknownError } from "@/lib/errors";
+import { isPlanLimitError, messageFromAuthError, messageFromUnknownError } from "@/lib/errors";
 import type {
   AccountType,
   ApprovalStatus,
@@ -76,8 +88,10 @@ import type {
   ChatMessage,
   DashboardView,
   Lead,
+  LeadStats,
   LeadStatus,
   LocationChoice,
+  PlanContext,
   ProducerAccount,
   ProducerProduct,
   ProducerSetup,
@@ -91,21 +105,26 @@ import type {
 import { AuthScreen } from "@/pages/AuthScreen";
 import { PendingApprovalScreen } from "@/pages/PendingApprovalScreen";
 import { ProducerOnboardingScreen } from "@/pages/ProducerOnboardingScreen";
+import { PlanBanner } from "@/components/PlanBanner";
+import { ProPaywallDialog } from "@/components/ProPaywallDialog";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { VenueProfilePage } from "@/pages/VenueProfilePage";
-import { LeadMapPanel, StatusBadge } from "@/pages/LeadMapPanel";
+import { DirectorPage } from "@/pages/DirectorPage";
+import { StatusBadge } from "@/pages/LeadMapPanel";
 import { CampaignSimPanel } from "@/pages/CampaignSimPanel";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { createProduct, patchProducerProduct } from "@/components/ProductEditor";
 import { LocationSearch } from "@/components/LocationSearch";
 import { SectionLabel, FieldBlock, QuickChoiceRow } from "@/components/FormBlocks";
 
-const onboardingSteps: Array<{
+type OnboardingStep = {
   key: ProfileKey;
   question: string;
   placeholder: string;
   quickReplies: string[];
-}> = [
+};
+
+const producerOnboardingSteps: OnboardingStep[] = [
   {
     key: "product",
     question: "Ce vinzi săptămâna asta?",
@@ -138,15 +157,45 @@ const onboardingSteps: Array<{
   },
 ];
 
-const conversations = [
+const venueOnboardingSteps: OnboardingStep[] = [
   {
-    id: "warm",
-    title: "Warm Leads",
-    subtitle: "Asistentul tău de vânzări",
-    preview: "Uite cine ar putea cumpăra săptămâna asta.",
-    time: "acum",
-    unread: 2,
+    key: "product",
+    question: "Ce produse cauți de la producători locali?",
+    placeholder: "Ex: miere, brânzeturi, legume de sezon",
+    quickReplies: ["Miere de salcâm", "Brânzeturi locale", "Legume de sezon", "Ouă și lactate"],
   },
+  {
+    key: "quantity",
+    question: "Ce cantități sau frecvență de aprovizionare ai nevoie?",
+    placeholder: "Ex: 20 kg/săptămână, 40 borcane/lună",
+    quickReplies: ["10 kg/săptămână", "20 kg/săptămână", "Comandă lunară", "Sezonier"],
+  },
+  {
+    key: "location",
+    question: "Unde e localul tău?",
+    placeholder: "Ex: Constanța, Mamaia, Mangalia",
+    quickReplies: ["Constanța", "Mamaia", "Mangalia", "Năvodari"],
+  },
+  {
+    key: "days",
+    question: "În ce zile preferi livrarea?",
+    placeholder: "Ex: marți și vineri dimineața",
+    quickReplies: ["Marți dimineața", "Joi după-amiază", "Vineri dimineața", "Weekend"],
+  },
+];
+
+const producerFailedSuggestions = [
+  "Vor brânză de capră, deși în meniu scrie 'brânză' (noi vindem doar de vacă)",
+  "Doresc livrare zilnică, iar noi livrăm doar vinerea",
+  "Prețul produselor noastre (34 lei/kg) este considerat prea mare",
+  "Au deja contract exclusiv stabil cu alt furnizor local",
+];
+
+const venueFailedSuggestions = [
+  "Prețul este prea mare pentru bugetul nostru",
+  "Nu livrează în zilele în care avem nevoie",
+  "Produsele nu se potrivesc cu ce căutăm acum",
+  "Avem deja un furnizor stabil pentru această categorie",
 ];
 
 const feedbackOptions: LeadStatus[] = ["Bun", "Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
@@ -159,9 +208,14 @@ const productIcons = [
   { label: "hartă", icon: MapPin, className: "bg-[#e9efd8] text-[#4e6536]" },
 ];
 
-function findNextStepIndex(nextProfile: Profile, startIndex: number) {
-  const nextIndex = onboardingSteps.findIndex((item, index) => index >= startIndex && !nextProfile[item.key]);
-  return nextIndex === -1 ? onboardingSteps.length : nextIndex;
+function getOnboardingSteps(venue: boolean): OnboardingStep[] {
+  return venue ? venueOnboardingSteps : producerOnboardingSteps;
+}
+
+function findNextStepIndex(nextProfile: Profile, startIndex: number, venue = false) {
+  const steps = getOnboardingSteps(venue);
+  const nextIndex = steps.findIndex((item, index) => index >= startIndex && !nextProfile[item.key]);
+  return nextIndex === -1 ? steps.length : nextIndex;
 }
 
 function profileToChatSnapshot(profile: Profile) {
@@ -182,21 +236,33 @@ function profileToChatSnapshot(profile: Profile) {
 
 function mergeAgentProfileUpdates(current: Profile, updates: Record<string, unknown>): Profile {
   const next: Profile = { ...current };
-
   if (typeof updates.product === "string") next.product = updates.product;
+  if (typeof updates.productsNeeded === "string") next.product = updates.productsNeeded;
   if (typeof updates.quantity === "string") next.quantity = updates.quantity;
+  if (typeof updates.supplyFrequency === "string") next.quantity = updates.supplyFrequency;
   if (typeof updates.location === "string") next.location = updates.location;
   if (typeof updates.range === "string") next.range = updates.range;
   if (typeof updates.days === "string") next.days = updates.days;
   if (typeof updates.deliveryDays === "string") next.days = updates.deliveryDays;
-
+  if (typeof updates.preferredDays === "string") next.days = updates.preferredDays;
   if (Array.isArray(updates.products) && updates.products.length) {
     const names = updates.products.map(String).filter(Boolean);
     next.products = names.map((name) => createProduct({ name }));
     next.product = names.join(", ");
   }
-
   return next;
+}
+
+function venueProfileToApiPayload(profile: Profile) {
+  return {
+    businessName: profile.businessName || "",
+    venueType: profile.venueType || "restaurant",
+    phone: profile.phone || "",
+    location: profile.location || "",
+    locationChoice: profile.locationChoice?.label ?? null,
+    latitude: profile.locationChoice?.lat ? Number.parseFloat(profile.locationChoice.lat) : null,
+    longitude: profile.locationChoice?.lon ? Number.parseFloat(profile.locationChoice.lon) : null,
+  };
 }
 
 function App() {
@@ -206,22 +272,7 @@ function App() {
   const [dashboardView, setDashboardView] = useState<DashboardView>("chat");
   const [activeConversation, setActiveConversation] = useState("warm");
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "m-1",
-      role: "agent",
-      kind: "text",
-      text: "Bună! Te ajut să găsești afaceri locale care ar putea cumpăra de la tine săptămâna asta.",
-      time: "09:30",
-    },
-    {
-      id: "m-2",
-      role: "agent",
-      kind: "text",
-      text: onboardingSteps[0].question,
-      time: "09:30",
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [profile, setProfile] = useState<Profile>({});
   const [currentStep, setCurrentStep] = useState(0);
   const [input, setInput] = useState("");
@@ -247,11 +298,25 @@ function App() {
   const [campaignSimLoading, setCampaignSimLoading] = useState(false);
   const [campaignSimSteps, setCampaignSimSteps] = useState<SimulatedCampaignStep[]>([]);
   const [campaignSimDisclaimer, setCampaignSimDisclaimer] = useState("");
+  const [plan, setPlan] = useState<PlanContext | null>(null);
+  const [leadStats, setLeadStats] = useState<LeadStats | null>(null);
+  const [planUpgrading, setPlanUpgrading] = useState(false);
+  const [paywallOpen, setPaywallOpen] = useState(false);
+  const [paywallMessage, setPaywallMessage] = useState("");
+  const [venueProducerScope, setVenueProducerScope] = useState<"matched" | "all">("matched");
+  const [venueMatchDiagnostics, setVenueMatchDiagnostics] = useState<import("@/lib/venueChatUtils").VenueMatchDiagnostics | undefined>();
+  const venueChat = useVenueChatSession(userId);
 
-  const onboardingDone = currentStep >= onboardingSteps.length;
-  const activeStepIndex = findNextStepIndex(profile, 0);
-  const step = onboardingDone ? undefined : onboardingSteps[activeStepIndex] ?? onboardingSteps[currentStep];
   const isVenue = account?.accountType === "venue";
+  const venueSessionNeeds = venueChat.needs;
+  const venueSessionSupplyFrequency = venueChat.supplyFrequency;
+  const venueSessionPreferredDays = venueChat.preferredDays;
+  const activeOnboardingSteps = getOnboardingSteps(isVenue);
+  const onboardingDone = currentStep >= activeOnboardingSteps.length;
+  const activeStepIndex = findNextStepIndex(profile, 0, isVenue);
+  const step = onboardingDone
+    ? undefined
+    : activeOnboardingSteps[activeStepIndex] ?? activeOnboardingSteps[currentStep];
 
   const activeLeadCount = useMemo(
     () => Object.values(leadStatuses).filter((status) => status !== "Nu e potrivit").length,
@@ -261,6 +326,88 @@ function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, typing, leadStatuses]);
+
+  async function refreshPlan() {
+    if (isVenue) return;
+    try {
+      const { plan: nextPlan } = await api.getPlan();
+      setPlan(nextPlan);
+    } catch {
+      // plan optional for UI
+    }
+  }
+
+  async function refreshLeadStats() {
+    if (isVenue || plan?.tier !== "pro") {
+      setLeadStats(null);
+      return;
+    }
+    try {
+      const { stats } = await api.getLeadStats();
+      setLeadStats(stats);
+    } catch {
+      setLeadStats(null);
+    }
+  }
+
+  function openPaywall(message: string) {
+    setPaywallMessage(message);
+    setPaywallOpen(true);
+  }
+
+  function handlePlanLimit(error: unknown): boolean {
+    if (!isPlanLimitError(error) || isVenue) return false;
+    openPaywall(error.message);
+    return true;
+  }
+
+  async function handleUpgradePro() {
+    if (planUpgrading || isVenue) return;
+    setPlanUpgrading(true);
+    try {
+      const { plan: nextPlan } = await api.upgradePro();
+      setPlan(nextPlan);
+      setPaywallOpen(false);
+      addAgentText(
+        "Pro activ (demo). Acum ai până la 15 lead-uri active, statistici în Director și detalii bogate.",
+        280,
+      );
+      await refreshLeadStats();
+      const { leads: refreshedLeads } = await api.listLeads();
+      setLeads(refreshedLeads);
+    } catch (error) {
+      addAgentText(messageFromUnknownError(error, "Nu am putut activa Pro acum."), 260);
+    } finally {
+      setPlanUpgrading(false);
+    }
+  }
+
+  async function handleDowngradeFree() {
+    if (planUpgrading || isVenue) return;
+    setPlanUpgrading(true);
+    try {
+      const { plan: nextPlan } = await api.downgradeFree();
+      setPlan(nextPlan);
+      setLeadStats(null);
+      addAgentText("Ai revenit la planul Free (demo).", 260);
+    } catch (error) {
+      addAgentText(messageFromUnknownError(error, "Nu am putut reveni la Free acum."), 260);
+    } finally {
+      setPlanUpgrading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isVenue && screen === "chat") {
+      void refreshPlan();
+    }
+  }, [isVenue, screen, leads.length, leadStatuses]);
+
+  useEffect(() => {
+    if (dashboardView === "director" && plan?.tier === "pro" && !isVenue) {
+      void refreshLeadStats();
+    }
+  }, [dashboardView, plan?.tier, isVenue, leads.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -284,86 +431,15 @@ function App() {
           return;
         }
 
-        const user = data.user;
-        setUserId(user.id);
-
-        const { accountType, approvalStatus: nextApprovalStatus } = await api.getAccount();
-        setAccount({ name: user.name, email: user.email, accountType });
-
-        if (accountType === "admin") {
-          window.location.href = "/admin";
-          return;
-        }
-
-        if (nextApprovalStatus === "pending" || nextApprovalStatus === "rejected") {
-          setApprovalStatus(nextApprovalStatus);
-          setScreen("pending-approval");
-          return;
-        }
-
-        if (accountType === "venue") {
-          try {
-            const venueDto = await api.getVenueProfile();
-            if (!cancelled) {
-              const restoredProfile = apiVenueProfileToFrontend(venueDto, { contactName: user.name });
-              setProfile(restoredProfile);
-              setCurrentStep(onboardingSteps.length);
-            }
-          } catch {
-            // profile optional on restore — user can still enter the app
-          }
-
-          setScreen("chat");
-          setDashboardView("chat");
-
-          void api
-            .listMatchedProducers()
-            .then(({ producers: matchedProducers }) => {
-              if (cancelled) return;
-              setLeads(matchedProducers);
-              const statuses: Record<string, LeadStatus> = {};
-              for (const producer of matchedProducers) {
-                if (producer.status) statuses[producer.id] = producer.status;
-              }
-              setLeadStatuses(statuses);
-            })
-            .catch(() => undefined);
-        } else {
-          try {
-            const dto = await api.getProfile();
-            if (!cancelled) {
-              const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
-              setProfile(restoredProfile);
-              setCurrentStep(findNextStepIndex(restoredProfile, 0));
-            }
-          } catch {
-            // profile optional on restore — user can still enter the app
-          }
-
-          setScreen("chat");
-          setDashboardView("chat");
-
-          void api
-            .listLeads()
-            .then(({ leads: storedLeads }) => {
-              if (cancelled) return;
-              setLeads(storedLeads);
-              const statuses: Record<string, LeadStatus> = {};
-              for (const lead of storedLeads) {
-                if (lead.status) statuses[lead.id] = lead.status;
-              }
-              setLeadStatuses(statuses);
-            })
-            .catch(() => undefined);
-        }
+        await restoreAuthenticatedSession(data.user);
       } catch {
         setScreen("auth");
       } finally {
-        setAuthChecking(false);
+        if (!cancelled) setAuthChecking(false);
       }
     }
 
-    restoreSession();
+    void restoreSession();
     return () => {
       cancelled = true;
     };
@@ -401,7 +477,7 @@ function App() {
       textMsg = messageDraft;
     } else {
       const productSummary = isVenue
-        ? profile.product || ""
+        ? venueSessionNeeds
         : summarizeProducts(profile.products).full || profile.product || "";
       try {
         const { message } = await api.draftMessage({
@@ -413,6 +489,10 @@ function App() {
           website: lead.website || "",
           menuItems: lead.menuItems || "",
           notes: lead.notes || "",
+          accountType: isVenue ? "venue" : "producer",
+          venueBusinessName: profile.businessName || profile.producerName || "",
+          supplyFrequency: venueSessionSupplyFrequency,
+          preferredDays: venueSessionPreferredDays,
         });
         textMsg = message;
       } catch {
@@ -422,7 +502,9 @@ function App() {
     const phoneNum = lead.phone?.replace(/[+\s-]/g, "") ?? "";
     if (phoneNum.length < 10) {
       addAgentText(
-        `${lead.name} nu are un număr de telefon public găsit online. Poți folosi mesajul sugerat și contacta prin site sau sursele din Detalii.`,
+        isVenue
+          ? `${lead.name} nu are telefon în profilul din platformă. Poți folosi mesajul sugerat sau contacta prin Detalii.`
+          : `${lead.name} nu are un număr de telefon public găsit online. Poți folosi mesajul sugerat și contacta prin site sau sursele din Detalii.`,
         400,
       );
       return;
@@ -452,6 +534,21 @@ function App() {
     setCustomFailedReason("");
   }
 
+  async function loadVenueProducers(
+    scope: "matched" | "all" = venueProducerScope,
+    needs: string = venueSessionNeeds,
+  ) {
+    const { producers, diagnostics } = await api.listMatchedProducers(scope, needs || undefined);
+    setLeads(producers);
+    setVenueMatchDiagnostics(diagnostics);
+    const statuses: Record<string, LeadStatus> = {};
+    for (const producer of producers) {
+      if (producer.status) statuses[producer.id] = producer.status;
+    }
+    setLeadStatuses(statuses);
+    return { producers, diagnostics };
+  }
+
   async function sendAgentMessage(text: string, profileSnapshot?: Profile) {
     const snapshot = profileSnapshot ?? profile;
 
@@ -465,20 +562,126 @@ function App() {
       const { reply, profileUpdates, leads: agentLeads, onboardingComplete } = await api.chatReply({
         userId,
         message: text,
-        profile: profileToChatSnapshot(snapshot),
+        accountType: isVenue ? "venue" : "producer",
+        profile: isVenue
+          ? venueProfileToChatSnapshot(snapshot, venueChat.session)
+          : profileToChatSnapshot(snapshot),
       });
 
       let mergedProfile = snapshot;
       if (profileUpdates && Object.keys(profileUpdates).length) {
         mergedProfile = mergeAgentProfileUpdates(snapshot, profileUpdates);
+      }
+
+      if (isVenue) {
+        let sessionNeeds = venueSessionNeeds;
+        let sessionFrequency = venueSessionSupplyFrequency;
+        let sessionDays = venueSessionPreferredDays;
+
+        if (typeof profileUpdates?.productsNeeded === "string") {
+          sessionNeeds = profileUpdates.productsNeeded;
+        } else if (typeof profileUpdates?.product === "string") {
+          sessionNeeds = profileUpdates.product;
+        }
+        if (typeof profileUpdates?.supplyFrequency === "string") {
+          sessionFrequency = profileUpdates.supplyFrequency;
+        } else if (typeof profileUpdates?.quantity === "string") {
+          sessionFrequency = profileUpdates.quantity;
+        }
+        if (typeof profileUpdates?.preferredDays === "string") {
+          sessionDays = profileUpdates.preferredDays;
+        } else if (typeof profileUpdates?.days === "string") {
+          sessionDays = profileUpdates.days;
+        }
+
+        const clientNeeds = mergeVenueProductNeeds(sessionNeeds, extractVenueNeedsFromMessage(text));
+        if (clientNeeds) {
+          sessionNeeds = clientNeeds;
+        }
+
+        venueChat.updateSession({
+          needs: sessionNeeds,
+          supplyFrequency: sessionFrequency,
+          preferredDays: sessionDays,
+        });
+
+        const sessionSnapshot = {
+          needs: sessionNeeds,
+          supplyFrequency: sessionFrequency,
+          preferredDays: sessionDays,
+        };
+        const readyForMatching = isVenueReadyForMatching(
+          sessionSnapshot,
+          snapshot.location,
+          onboardingComplete,
+        );
+
+        const previousIds = new Set(leads.map((item) => item.id));
+        const followUp: ChatMessage[] = [];
+
+        if (readyForMatching) {
+          const { producers: refreshed, diagnostics } = await loadVenueProducers("matched", sessionNeeds);
+          setVenueProducerScope("matched");
+          const productLabel = sessionNeeds.trim() || "produsele căutate";
+
+          if (refreshed.length === 0) {
+            followUp.push({
+              id: crypto.randomUUID(),
+              role: "agent",
+              kind: "text",
+              text: buildVenueZeroMatchMessage(productLabel, diagnostics),
+              time: now(),
+            });
+          } else {
+            const newProducers = refreshed.filter((producer) => !previousIds.has(producer.id));
+            followUp.push({
+              id: crypto.randomUUID(),
+              role: "agent",
+              kind: "text",
+              text:
+                newProducers.length > 0
+                  ? `Am actualizat lista — ${newProducers.length} producători noi potriviți pentru ${productLabel}.`
+                  : `Am găsit ${refreshed.length} producători potriviți pentru ${productLabel}.`,
+              time: now(),
+            });
+            const cardsToShow = newProducers.length > 0 ? newProducers : refreshed;
+            followUp.push(
+              ...cardsToShow.map<ChatMessage>((producer) => ({
+                id: crypto.randomUUID(),
+                role: "agent",
+                kind: "lead",
+                leadId: producer.id,
+                time: now(),
+              })),
+            );
+          }
+        }
+
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text: reply,
+            time: now(),
+          },
+          ...followUp,
+        ]);
+        setTyping(false);
+        return;
+      }
+
+      if (profileUpdates && Object.keys(profileUpdates).length) {
         setProfile(mergedProfile);
         void api.updateProfile(setupToApiPayload(mergedProfile)).catch(() => undefined);
       }
 
-      if (onboardingComplete || findNextStepIndex(mergedProfile, 0) >= onboardingSteps.length) {
-        setCurrentStep(onboardingSteps.length);
+      const steps = getOnboardingSteps(isVenue);
+      if (onboardingComplete || findNextStepIndex(mergedProfile, 0, isVenue) >= steps.length) {
+        setCurrentStep(steps.length);
       } else {
-        setCurrentStep(findNextStepIndex(mergedProfile, 0));
+        setCurrentStep(findNextStepIndex(mergedProfile, 0, isVenue));
       }
 
       setMessages((items) => [
@@ -492,7 +695,7 @@ function App() {
         },
       ]);
 
-      if (agentLeads?.length) {
+      if (!isVenue && agentLeads?.length) {
         const existingIds = new Set(leads.map((l) => l.id));
         const newLeads = agentLeads.filter((l) => !existingIds.has(l.id));
         if (newLeads.length) {
@@ -509,14 +712,17 @@ function App() {
           ]);
         }
       }
-    } catch {
+    } catch (error) {
       setMessages((items) => [
         ...items,
         {
           id: crypto.randomUUID(),
           role: "agent",
           kind: "text",
-          text: "Nu am putut contacta agentul acum. Încearcă din nou.",
+          text: messageFromUnknownError(
+            error,
+            "Nu am putut contacta agentul acum. Încearcă din nou.",
+          ),
           time: now(),
         },
       ]);
@@ -562,12 +768,15 @@ function App() {
       );
     } catch (error) {
       setCampaignSimOpen(false);
-      addAgentText(
-        messageFromUnknownError(error, "Simularea campaniei nu a putut rula acum."),
-        300,
-      );
+      if (!handlePlanLimit(error)) {
+        addAgentText(
+          messageFromUnknownError(error, "Simularea campaniei nu a putut rula acum."),
+          300,
+        );
+      }
     } finally {
       setCampaignSimLoading(false);
+      void refreshPlan();
     }
   }
 
@@ -577,7 +786,7 @@ function App() {
     setMessageDraftLoading(true);
 
     const productSummary = isVenue
-      ? profile.product || ""
+      ? venueSessionNeeds
       : summarizeProducts(profile.products).full || profile.product || "";
     void api
       .draftMessage({
@@ -589,6 +798,10 @@ function App() {
         website: lead.website || "",
         menuItems: lead.menuItems || "",
         notes: lead.notes || "",
+        accountType: isVenue ? "venue" : "producer",
+        venueBusinessName: profile.businessName || profile.producerName || "",
+        supplyFrequency: venueSessionSupplyFrequency,
+        preferredDays: venueSessionPreferredDays,
       })
       .then(({ message }) => setMessageDraft(message))
       .catch(() => setMessageDraft(lead.contact))
@@ -622,30 +835,11 @@ function App() {
     setProfileSaved(false);
     setProfileSaveError(null);
     try {
-      const dto = await api.updateVenueProfile({
-        businessName: profile.businessName || "",
-        venueType: profile.venueType || "restaurant",
-        phone: profile.phone || "",
-        location: profile.location || "",
-        locationChoice: profile.locationChoice?.label ?? null,
-        latitude: profile.locationChoice?.lat ? Number.parseFloat(profile.locationChoice.lat) : null,
-        longitude: profile.locationChoice?.lon ? Number.parseFloat(profile.locationChoice.lon) : null,
-        productsNeeded: profile.product || "",
-        supplyFrequency: profile.quantity || "",
-        preferredDays: profile.days || "",
-      });
+      const dto = await api.updateVenueProfile(venueProfileToApiPayload(profile));
       setProfile((current) =>
         apiVenueProfileToFrontend(dto, { contactName: current.producerName }),
       );
       setProfileSaved(true);
-
-      const { producers: matchedProducers } = await api.listMatchedProducers();
-      setLeads(matchedProducers);
-      const statuses: Record<string, LeadStatus> = {};
-      for (const producer of matchedProducers) {
-        if (producer.status) statuses[producer.id] = producer.status;
-      }
-      setLeadStatuses(statuses);
     } catch (error) {
       setProfileSaved(false);
       setProfileSaveError(messageFromUnknownError(error, "Nu am putut salva profilul. Încearcă din nou."));
@@ -658,13 +852,8 @@ function App() {
     setTyping(true);
     window.setTimeout(async () => {
       try {
-        const { producers: matchedProducers } = await api.listMatchedProducers();
-        setLeads(matchedProducers);
-        const statuses: Record<string, LeadStatus> = {};
-        for (const producer of matchedProducers) {
-          if (producer.status) statuses[producer.id] = producer.status;
-        }
-        setLeadStatuses(statuses);
+        const { producers: matchedProducers } = await loadVenueProducers("matched");
+        setVenueProducerScope("matched");
 
         setMessages((items) => [
           ...items,
@@ -674,8 +863,8 @@ function App() {
             kind: "text",
             text:
               matchedProducers.length > 0
-                ? "Am găsit câțiva producători locali potriviți. Îți las mai jos recomandările și de ce merită contactați."
-                : "Nu am găsit producători în zona ta acum. Actualizează produsele căutate sau localitatea din profil.",
+                ? `Am găsit ${matchedProducers.length} producători înregistrați care se potrivesc cu ${venueSessionNeeds.trim() || "ce cauți"}.`
+                : `Nu am găsit producători potriviți pentru ${venueSessionNeeds.trim() || "produsele menționate"}. Deschide tab-ul Director pentru lista completă.`,
             time: now(),
           },
           ...matchedProducers.map<ChatMessage>((producer) => ({
@@ -733,21 +922,24 @@ function App() {
           })),
         ]);
       } catch (error) {
-        setMessages((items) => [
-          ...items,
-          {
-            id: crypto.randomUUID(),
-            role: "agent",
-            kind: "text",
-            text: messageFromUnknownError(
-              error,
-              "Nu am putut încărca lead-urile. Verifică conexiunea la server.",
-            ),
-            time: now(),
-          },
-        ]);
+        if (!handlePlanLimit(error)) {
+          setMessages((items) => [
+            ...items,
+            {
+              id: crypto.randomUUID(),
+              role: "agent",
+              kind: "text",
+              text: messageFromUnknownError(
+                error,
+                "Nu am putut încărca lead-urile. Verifică conexiunea la server.",
+              ),
+              time: now(),
+            },
+          ]);
+        }
       } finally {
         setTyping(false);
+        void refreshPlan();
       }
     }, delay);
   }
@@ -757,6 +949,29 @@ function App() {
     setSearchingMoreLeads(true);
     setTyping(true);
     try {
+      if (isVenue) {
+        const { producers: allProducers } = await loadVenueProducers("all");
+        setVenueProducerScope("all");
+        const openingDirector = dashboardView !== "director";
+        if (openingDirector) {
+          setDashboardView("director");
+          setMessages((items) => [
+            ...items,
+            {
+              id: crypto.randomUUID(),
+              role: "agent",
+              kind: "text",
+              text:
+                allProducers.length > 0
+                  ? `Lista completă (${allProducers.length} producători) e în Director — poți filtra după distanță acolo.`
+                  : "Nu există încă producători înregistrați în platformă.",
+              time: now(),
+            },
+          ]);
+        }
+        return;
+      }
+
       const { leads: freshLeads } = await api.matchMoreLeads();
       const existingIds = new Set(leads.map((l) => l.id));
       const newLeads = freshLeads.filter((l) => !existingIds.has(l.id));
@@ -794,27 +1009,30 @@ function App() {
         })),
       ]);
     } catch (error) {
-      setMessages((items) => [
-        ...items,
-        {
-          id: crypto.randomUUID(),
-          role: "agent",
-          kind: "text",
-          text: messageFromUnknownError(
-            error,
-            "Nu am putut căuta alte lead-uri acum. Încearcă din nou.",
-          ),
-          time: now(),
-        },
-      ]);
+      if (!handlePlanLimit(error)) {
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text: messageFromUnknownError(
+              error,
+              "Nu am putut căuta alte lead-uri acum. Încearcă din nou.",
+            ),
+            time: now(),
+          },
+        ]);
+      }
     } finally {
       setSearchingMoreLeads(false);
       setTyping(false);
+      void refreshPlan();
     }
   }
 
-  function startChatWithProfile(nextProfile: Profile, producerName?: string) {
-    const firstStepIndex = findNextStepIndex(nextProfile, 0);
+  function initProducerChat(nextProfile: Profile, producerName?: string) {
+    const firstStepIndex = findNextStepIndex(nextProfile, 0, false);
     const greetingName = producerName ? `, ${producerName}` : "";
     const productSummary = summarizeProducts(nextProfile.products);
     const introMessages: ChatMessage[] = [
@@ -837,12 +1055,12 @@ function App() {
       });
     }
 
-    if (firstStepIndex < onboardingSteps.length) {
+    if (firstStepIndex < producerOnboardingSteps.length) {
       introMessages.push({
         id: crypto.randomUUID(),
         role: "agent",
         kind: "text",
-        text: onboardingSteps[firstStepIndex].question,
+        text: producerOnboardingSteps[firstStepIndex].question,
         time: now(),
       });
     } else {
@@ -863,41 +1081,31 @@ function App() {
     setDashboardView("chat");
     setScreen("chat");
 
-    if (firstStepIndex >= onboardingSteps.length) {
+    if (firstStepIndex >= producerOnboardingSteps.length) {
       addRecommendations(680);
     }
   }
 
-  function startVenueChat(nextProfile: Profile, contactName?: string) {
+  function initVenueChat(nextProfile: Profile, contactName?: string, freshSession = false) {
+    if (freshSession) venueChat.reset(userId);
     const greetingName = contactName ? `, ${contactName}` : "";
     const introMessages: ChatMessage[] = [
       {
         id: crypto.randomUUID(),
         role: "agent",
         kind: "text",
-        text: `Bun venit${greetingName}. Am salvat profilul localului tău și îl folosesc ca să găsim producători potriviți din Dobrogea.`,
+        text: `Bun venit${greetingName}. Am salvat profilul localului tău din ${nextProfile.location || "Dobrogea"}. Spune-mi ce produse cauți, apoi cantitatea/frecvența și zilele preferate de livrare — abia după aceea îți arăt producătorii potriviți.`,
         time: now(),
       },
     ];
 
-    if (nextProfile.product || nextProfile.location) {
-      introMessages.push({
-        id: crypto.randomUUID(),
-        role: "agent",
-        kind: "text",
-        text: `Cauți ${nextProfile.product || "produse locale"} în zona ${nextProfile.location || "Dobrogea"}${nextProfile.days ? `, cu livrare preferată ${nextProfile.days}` : ""}.`,
-        time: now(),
-      });
-    }
-
     setProfile(nextProfile);
     setMessages(introMessages);
-    setCurrentStep(onboardingSteps.length);
+    setCurrentStep(venueOnboardingSteps.length);
     setTyping(false);
     setMobileChatOpen(false);
     setDashboardView("chat");
     setScreen("chat");
-    addVenueRecommendations(680);
   }
 
   async function restoreAuthenticatedSession(user: { id?: string; name: string; email: string }) {
@@ -919,7 +1127,8 @@ function App() {
     if (accountType === "venue") {
       const venueDto = await api.getVenueProfile();
       const restoredProfile = apiVenueProfileToFrontend(venueDto, { contactName: user.name });
-      startVenueChat(restoredProfile, user.name);
+      initVenueChat(restoredProfile, user.name, false);
+      if (user.id) venueChat.hydrate(user.id);
 
       void api
         .listMatchedProducers()
@@ -937,7 +1146,7 @@ function App() {
 
     const dto = await api.getProfile();
     const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
-    startChatWithProfile(restoredProfile, user.name);
+    initProducerChat(restoredProfile, user.name);
 
     void api
       .listLeads()
@@ -950,12 +1159,24 @@ function App() {
         setLeadStatuses(statuses);
       })
       .catch(() => undefined);
+
+    void api
+      .getPlan()
+      .then(({ plan: restoredPlan }) => setPlan(restoredPlan))
+      .catch(() => undefined);
   }
 
   async function handleLogout() {
     await authClient.signOut();
     setAccount(null);
+    setUserId(null);
     setApprovalStatus(null);
+    setMessages([]);
+    setLeads([]);
+    setLeadStatuses({});
+    venueChat.reset(userId);
+    setCurrentStep(0);
+    setDashboardView("chat");
     setScreen("auth");
   }
 
@@ -1018,18 +1239,16 @@ function App() {
         setScreen("pending-approval");
         return;
       }
-      startVenueChat(
+      initVenueChat(
         {
           producerName: venueSetup.contactName,
           businessName: venueSetup.businessName,
           phone: venueSetup.phone,
-          product: venueSetup.productsNeeded,
-          quantity: venueSetup.supplyFrequency,
           location: venueSetup.location,
           locationChoice: venueSetup.locationChoice,
-          days: venueSetup.preferredDays,
         },
         name,
+        true,
       );
       return;
     }
@@ -1044,7 +1263,7 @@ function App() {
     }
 
     const productSummary = summarizeProducts(producerSetup.products);
-    startChatWithProfile(
+    initProducerChat(
       {
         producerName: producerSetup.producerName,
         businessName: producerSetup.businessName,
@@ -1064,7 +1283,7 @@ function App() {
   function handleProducerOnboarding(setup: ProducerSetup) {
     const productSummary = summarizeProducts(setup.products);
 
-    startChatWithProfile(
+    initProducerChat(
       {
         producerName: setup.producerName,
         businessName: setup.businessName,
@@ -1120,7 +1339,7 @@ function App() {
   }
 
   function updateVenueProfileField(
-    key: "businessName" | "phone" | "location" | "product" | "quantity" | "days" | "venueType",
+    key: "businessName" | "phone" | "location" | "venueType",
     value: string,
   ) {
     setProfile((current) => ({ ...current, [key]: value }));
@@ -1131,9 +1350,10 @@ function App() {
     if (!cleanValue || typing) return;
     if (!onboardingDone && !step) return;
 
+    const steps = getOnboardingSteps(isVenue);
     const answeredStep = step!;
     const nextProfile = { ...profile, [answeredStep.key]: cleanValue };
-    const nextStepIndex = findNextStepIndex(nextProfile, currentStep + 1);
+    const nextStepIndex = findNextStepIndex(nextProfile, currentStep + 1, isVenue);
 
     setInput("");
     setProfile(nextProfile);
@@ -1149,12 +1369,23 @@ function App() {
     ]);
     setCurrentStep(nextStepIndex);
 
-    if (nextStepIndex < onboardingSteps.length) {
+    if (nextStepIndex < steps.length) {
+      void addOnboardingAgentReply(answeredStep.key, cleanValue, steps[nextStepIndex].question);
+      return;
+    }
+
+    if (isVenue) {
+      if (answeredStep.key === "product") {
+        venueChat.setNeeds(cleanValue);
+      }
       void addOnboardingAgentReply(
         answeredStep.key,
         cleanValue,
-        onboardingSteps[nextStepIndex].question,
+        `Perfect. Cauți ${nextProfile.product || "produse locale"} în ${nextProfile.location || "Dobrogea"}.`,
       );
+      if (userId && answeredStep.key === "days") {
+        void loadVenueProducers("matched", nextProfile.product || cleanValue);
+      }
       return;
     }
 
@@ -1262,6 +1493,7 @@ function App() {
           activeView={dashboardView}
           onViewChange={setDashboardView}
           isVenue={isVenue}
+          venueSessionNeeds={venueSessionNeeds}
         />
 
         {dashboardView === "profile" ? (
@@ -1273,16 +1505,22 @@ function App() {
               saved={profileSaved}
               saveError={profileSaveError}
               onSave={() => void saveVenueProfile()}
+              onLogout={() => void handleLogout()}
               onProfileFieldChange={updateVenueProfileField}
             />
           ) : (
             <ProfilePage
               profile={profile}
               activeLeadCount={displayLeadCount}
+              plan={plan}
+              planUpgrading={planUpgrading}
               saving={profileSaving}
               saved={profileSaved}
               saveError={profileSaveError}
               onSave={() => void saveProfile()}
+              onLogout={() => void handleLogout()}
+              onUpgradePro={() => void handleUpgradePro()}
+              onDowngradeFree={() => void handleDowngradeFree()}
               onProductAdd={addProfileProduct}
               onProductRemove={removeProfileProduct}
               onProductUpdate={updateProfileProduct}
@@ -1291,16 +1529,11 @@ function App() {
             />
           )
         ) : (
-          <div
-            className={cn(
-              "grid min-h-0 flex-1 overflow-hidden bg-[#f7f3e8]",
-              dashboardView === "chat" ? "lg:grid-cols-[minmax(0,1fr)_420px]" : "grid-cols-1",
-            )}
-          >
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden bg-[#f7f3e8]">
             <section
               className={cn(
-                "min-h-0 flex-1 flex-col overflow-hidden border-b border-[#d7ccb3] lg:border-b-0 lg:border-r",
-                dashboardView === "chat" ? "flex lg:flex" : "hidden lg:hidden",
+                "min-h-0 flex-1 flex-col overflow-hidden",
+                dashboardView === "chat" ? "flex" : "hidden",
               )}
             >
               <ChatHeader
@@ -1311,6 +1544,11 @@ function App() {
 
               <ScrollArea className="chat-pattern min-h-0 flex-1">
                 <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:px-5 lg:px-6">
+                  <PlanBanner
+                    plan={plan}
+                    isVenue={isVenue}
+                    onUpgrade={() => openPaywall("Treci la Pro pentru mai multe recomandări și funcții avansate.")}
+                  />
                   <DatePill />
                   {messages.map((message) => (
                     <MessageBubble
@@ -1350,38 +1588,46 @@ function App() {
                     ))}
                   </div>
                 ) : (
+                  <>
+                    {isVenue && dashboardView === "chat" ? (
+                      <VenueChatProgress session={venueChat.session} />
+                    ) : null}
                   <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2 pb-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={campaignSimLoading || typing || !leads.length}
-                      onClick={() => void runCampaignSimulation()}
-                      className="shrink-0 border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
-                    >
-                      {campaignSimLoading ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Sparkles className="h-3.5 w-3.5" />
-                      )}
-                      Simulare campanie
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={searchingMoreLeads || typing}
-                      onClick={() => void searchMoreLeads()}
-                      className="shrink-0 border-[#c8d9aa] bg-[#f0f5e8] text-[#3f532c] hover:bg-[#e3edd4]"
-                    >
-                      {searchingMoreLeads ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Search className="h-3.5 w-3.5" />
-                      )}
-                      Caută alte lead-uri
-                    </Button>
-                    {leads.slice(0, 3).map((lead) => (
+                    {!isVenue ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={campaignSimLoading || typing || !leads.length}
+                        onClick={() => void runCampaignSimulation()}
+                        className="shrink-0 border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                      >
+                        {campaignSimLoading ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )}
+                        Simulare campanie
+                      </Button>
+                    ) : null}
+                    {!isVenue ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={searchingMoreLeads || typing}
+                        onClick={() => void searchMoreLeads()}
+                        className="shrink-0 border-[#c8d9aa] bg-[#f0f5e8] text-[#3f532c] hover:bg-[#e3edd4]"
+                      >
+                        {searchingMoreLeads ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Search className="h-3.5 w-3.5" />
+                        )}
+                        Caută alte lead-uri
+                      </Button>
+                    ) : null}
+                    {(isVenue ? venueLeadsFromChat(messages, leads) : leads.slice(0, 3)).map((lead) => (
                       <Button
                         key={lead.id}
                         type="button"
@@ -1395,6 +1641,7 @@ function App() {
                       </Button>
                     ))}
                   </div>
+                  </>
                 )}
 
                 <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl items-center gap-2">
@@ -1419,34 +1666,69 @@ function App() {
               </div>
             </section>
 
-            <div
-              key={dashboardView}
-              className={cn(
-                "min-h-0 overflow-hidden",
-                dashboardView === "map" ? "flex lg:flex flex-1" : "hidden lg:flex",
-              )}
-            >
-              <LeadMapPanel
-                leads={leads}
-                statuses={leadStatuses}
-                failedFeedbacks={failedFeedbacks}
-                activeLeadCount={displayLeadCount}
-                searchingMore={searchingMoreLeads}
-                onSearchMore={() => void searchMoreLeads()}
-                onDetails={setSelectedLead}
-                onMessage={openMessageLead}
-                onStatus={updateLeadStatus}
-                onWhatsAppClick={handleWhatsAppRedirect}
-                onFailedClick={setFailedLeadDialog}
-                isVenue={isVenue}
-              />
-            </div>
+            {dashboardView === "director" ? (
+              <div className="flex min-h-0 flex-1 overflow-hidden">
+                <DirectorPage
+                  leads={leads}
+                  statuses={leadStatuses}
+                  failedFeedbacks={failedFeedbacks}
+                  activeLeadCount={displayLeadCount}
+                  searchingMore={searchingMoreLeads}
+                  plan={plan}
+                  stats={leadStats}
+                  products={profile.products ?? []}
+                  productChips={
+                    isVenue
+                      ? venueSessionNeeds
+                          .split(/[,;]+/)
+                          .map((item) => item.trim())
+                          .filter(Boolean)
+                          .slice(0, 6)
+                      : undefined
+                  }
+                  isVenue={isVenue}
+                  venueProducerScope={venueProducerScope}
+                  onVenueProducerScopeChange={(scope) => {
+                    setVenueProducerScope(scope);
+                    void loadVenueProducers(scope);
+                  }}
+                  onSearchMore={
+                    isVenue
+                      ? venueProducerScope === "matched"
+                        ? () => void searchMoreLeads()
+                        : undefined
+                      : plan?.limits.discoverMore
+                        ? () => void searchMoreLeads()
+                        : undefined
+                  }
+                  onUpgrade={() => openPaywall("Directorul complet și „Caută alte lead-uri” sunt în planul Pro.")}
+                  onDetails={setSelectedLead}
+                  onMessage={openMessageLead}
+                  onStatus={updateLeadStatus}
+                  onWhatsAppClick={handleWhatsAppRedirect}
+                  onFailedClick={setFailedLeadDialog}
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </div>
 
       <MobileBottomNav activeView={dashboardView} onViewChange={setDashboardView} />
-      <LeadDetailsDialog lead={selectedLead} open={Boolean(selectedLead)} onOpenChange={(open) => !open && setSelectedLead(null)} />
+      <ProPaywallDialog
+        open={paywallOpen}
+        message={paywallMessage}
+        upgrading={planUpgrading}
+        onOpenChange={setPaywallOpen}
+        onUpgrade={() => void handleUpgradePro()}
+      />
+      <LeadDetailsDialog
+        lead={selectedLead}
+        planTier={plan?.tier ?? "free"}
+        isVenue={isVenue}
+        open={Boolean(selectedLead)}
+        onOpenChange={(open) => !open && setSelectedLead(null)}
+      />
       <ContactMessageDialog
         lead={messageLead}
         draft={messageDraft}
@@ -1469,18 +1751,15 @@ function App() {
           <DialogHeader className="text-left">
             <DialogTitle className="text-[#263421] font-extrabold text-xl">De ce nu a mers contactarea?</DialogTitle>
             <DialogDescription className="text-[#62705a]">
-              AI-ul va stoca acest motiv pentru a exclude recomandările similare în viitor.
+              {isVenue
+                ? "Vom ține cont de acest motiv la recomandările viitoare de producători."
+                : "AI-ul va stoca acest motiv pentru a exclude recomandările similare în viitor."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <p className="text-xs font-bold uppercase text-[#5a654f] tracking-wider">Sugestii rapide de feedback</p>
             <div className="flex flex-col gap-2">
-              {[
-                "Vor brânză de capră, deși în meniu scrie 'brânză' (noi vindem doar de vacă)",
-                "Doresc livrare zilnică, iar noi livrăm doar vinerea",
-                "Prețul produselor noastre (34 lei/kg) este considerat prea mare",
-                "Au deja contract exclusiv stabil cu alt furnizor local"
-              ].map((suggestion) => (
+              {(isVenue ? venueFailedSuggestions : producerFailedSuggestions).map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
@@ -1535,17 +1814,19 @@ function DashboardHeader({
   activeView,
   onViewChange,
   isVenue = false,
+  venueSessionNeeds = "",
 }: {
   profile: Profile;
   activeLeadCount: number;
   activeView: DashboardView;
   onViewChange: (view: DashboardView) => void;
   isVenue?: boolean;
+  venueSessionNeeds?: string;
 }) {
   const productSummary = summarizeProducts(profile.products);
   const activeTitle: Record<DashboardView, string> = {
     chat: "Chat",
-    map: "Hartă",
+    director: "Director",
     profile: "Profil",
   };
 
@@ -1564,7 +1845,8 @@ function DashboardHeader({
               </Badge>
             </div>
             <p className="truncate text-xs text-muted-foreground sm:text-sm">
-              {(isVenue ? profile.product : productSummary.product) || "Produse"} · {profile.location || "Dobrogea"} ·{" "}
+              {(isVenue ? venueSessionNeeds || "Spune în Chat" : productSummary.product) || "Produse"} ·{" "}
+              {profile.location || "Dobrogea"} ·{" "}
               {activeLeadCount} {isVenue ? "producători" : "lead-uri"}
             </p>
           </div>
@@ -1572,7 +1854,7 @@ function DashboardHeader({
 
         <div className="hidden shrink-0 rounded-full border border-[#ded5bf] bg-[#fffaf0] p-1 md:flex">
           <DashboardNavButton active={activeView === "chat"} icon={MessageCircle} label="Chat" onClick={() => onViewChange("chat")} />
-          <DashboardNavButton active={activeView === "map"} icon={MapPin} label="Hartă" onClick={() => onViewChange("map")} />
+          <DashboardNavButton active={activeView === "director"} icon={LayoutGrid} label="Director" onClick={() => onViewChange("director")} />
           <DashboardNavButton active={activeView === "profile"} icon={UserRound} label="Profil" onClick={() => onViewChange("profile")} />
         </div>
       </div>
@@ -1629,7 +1911,7 @@ function MobileBottomNav({
 }) {
   const items: Array<{ id: DashboardView; label: string; icon: typeof MessageCircle }> = [
     { id: "chat", label: "Chat", icon: MessageCircle },
-    { id: "map", label: "Hartă", icon: MapPin },
+    { id: "director", label: "Director", icon: LayoutGrid },
     { id: "profile", label: "Profil", icon: UserRound },
   ];
 
@@ -1721,10 +2003,15 @@ function ProfileRow({ label, value, icon: Icon }: { label: string; value?: strin
 }
 
 function DatePill() {
+  const label = new Intl.DateTimeFormat("ro-RO", {
+    day: "numeric",
+    month: "long",
+  }).format(new Date());
+
   return (
     <div className="flex justify-center">
       <span className="rounded-full bg-white/70 px-3 py-1 text-xs font-bold text-[#6b715f] shadow-sm">
-        Azi, 6 iunie
+        Azi, {label}
       </span>
     </div>
   );
@@ -1839,6 +2126,12 @@ function LeadCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="truncate text-base">{lead.name}</CardTitle>
+              {lead.verified ? (
+                <Badge variant="olive" className="shrink-0">Verificat</Badge>
+              ) : null}
+              {lead.match >= 85 ? (
+                <Badge variant="warm" className="shrink-0">Top match</Badge>
+              ) : null}
               <Badge variant="blue" className="border-[#c8dde5] bg-[#e6f1f4]">
                 {lead.match}% potrivire
               </Badge>
@@ -1857,7 +2150,9 @@ function LeadCard({
       </CardHeader>
       <CardContent className="space-y-4 p-4 pt-0">
         <div className="rounded-2xl bg-[#f5f0e5] p-3">
-          <p className="text-sm font-semibold text-[#29361f]">Îl recomand pentru că...</p>
+          <p className="text-sm font-semibold text-[#29361f]">
+            {isVenue ? "Recomand pentru că..." : "Îl recomand pentru că..."}
+          </p>
           <p className="mt-1 text-sm text-[#5a654f]">{lead.reason}</p>
         </div>
 
@@ -1874,6 +2169,8 @@ function LeadCard({
         <p className="text-sm text-[#44533d]">
           <span className="font-bold">{isVenue ? "Oferă:" : "Ai putea să-i vinzi:"}</span> {lead.sell}
         </p>
+
+        {isVenue ? <MatchWhySection lead={lead} isVenue /> : null}
 
         <div className="grid gap-2 sm:grid-cols-2 text-xs border-t border-[#eadfca] pt-3">
           {lead.website && (
@@ -1909,18 +2206,20 @@ function LeadCard({
           )}
           {lead.notes && (
             <div className="sm:col-span-2 bg-[#fffbf2] border border-[#eadfca] rounded-xl p-2 mt-1">
-              <span className="font-bold text-[#33412c] block mb-0.5">ℹ️ AI Context:</span>
+              <span className="font-bold text-[#33412c] block mb-0.5">
+                {isVenue ? "ℹ️ Detalii platformă:" : "ℹ️ AI Context:"}
+              </span>
               <span className="text-[#5a654f] italic">{lead.notes}</span>
             </div>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Button variant="outline" size="sm" onClick={() => onDetails(lead)}>
+          <Button variant="outline" size="sm" className="min-h-11" onClick={() => onDetails(lead)}>
             <BadgeCheck className="h-4 w-4" />
             Detalii
           </Button>
-          <Button variant="honey" size="sm" onClick={() => onMessage(lead)}>
+          <Button variant="honey" size="sm" className="min-h-11" onClick={() => onMessage(lead)}>
             <MessageCircle className="h-4 w-4" />
             Scrie mesaj
           </Button>
@@ -1978,96 +2277,159 @@ function TypingBubble() {
 
 function LeadDetailsDialog({
   lead,
+  planTier,
+  isVenue = false,
   open,
   onOpenChange,
 }: {
   lead: Lead | null;
+  planTier: "free" | "pro";
+  isVenue?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   if (!lead) return null;
   const Icon = leadIcon(lead.icon);
+  const isPro = planTier === "pro";
+  const pro = lead.proDetails;
+  const shortSources = isPro && pro?.sourceUrls.length ? pro.sourceUrls : lead.sourceUrls ?? [];
+  const shortNotes = isPro && pro?.notes ? pro.notes : lead.notes;
+  const shortMenu = isPro && pro?.menuItems ? pro.menuItems : lead.menuItems;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto">
-        <DialogHeader className="text-left">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e9f0dc] text-[#4d6638]">
-            <Icon className="h-6 w-6" />
+      <DialogContent className="flex max-h-[min(92dvh,760px)] w-[calc(100vw-1rem)] max-w-lg flex-col gap-0 overflow-hidden rounded-[24px] border-[#d7ccb3] bg-[#fffdfa] p-0 sm:max-w-xl">
+        <DialogHeader className="shrink-0 space-y-2 border-b border-[#eadfca] px-4 py-4 pr-12 text-left sm:px-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#e9f0dc] text-[#4d6638]">
+              <Icon className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <DialogTitle className="text-base font-extrabold leading-tight sm:text-lg">
+                  {lead.name}
+                </DialogTitle>
+                {isPro ? <Badge variant="olive">Pro</Badge> : null}
+              </div>
+              <DialogDescription className="mt-1 line-clamp-2 text-xs sm:text-sm">
+                {lead.type} · {lead.location}
+              </DialogDescription>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge variant="blue">{lead.match}% potrivire</Badge>
+                <Badge variant="warm">{lead.distance}</Badge>
+              </div>
+            </div>
           </div>
-          <DialogTitle>{lead.name}</DialogTitle>
-          <DialogDescription>
-            {lead.type} · {lead.location}
-          </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="short" className="mt-6">
-          <TabsList className="w-full justify-start">
-            <TabsTrigger value="short">Pe scurt</TabsTrigger>
-            <TabsTrigger value="why">De ce</TabsTrigger>
-            <TabsTrigger value="message">Mesaj</TabsTrigger>
-          </TabsList>
-          <TabsContent value="short" className="space-y-3">
-            <DetailRow icon={MapPin} label="Distanță" value={lead.distance} />
-            <DetailRow icon={BadgeCheck} label="Potrivire" value={`${lead.match}%`} />
-            <DetailRow icon={CalendarDays} label="Moment bun" value={lead.bestDay} />
-            {lead.website ? (
-              <DetailLinkRow icon={Globe} label="Website" href={normalizeUrl(lead.website)} text={lead.website} />
-            ) : null}
-            {lead.phone ? (
-              <DetailRow
-                icon={Phone}
-                label="Telefon"
-                value={lead.contactPerson ? `${lead.phone} · ${lead.contactPerson}` : lead.phone}
-              />
-            ) : null}
-            {lead.menuItems ? <InfoBlock title="Meniu / ofertă" text={lead.menuItems} /> : null}
-            {lead.notes ? <InfoBlock title="Informații din surse web" text={lead.notes} /> : null}
-            {lead.sourceUrls?.length ? (
-              <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-4">
-                <p className="text-sm font-bold text-[#263421]">Surse online</p>
-                <ul className="mt-2 space-y-1.5">
-                  {lead.sourceUrls.map((url, index) => (
-                    <li key={`${url}-${index}`}>
-                      <a
-                        href={normalizeUrl(url)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-sm text-[#4d6638] underline-offset-2 hover:underline"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-                        {url.includes("vertexaisearch.cloud.google.com")
-                          ? `Sursă web ${index + 1}`
-                          : url}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
+        <Tabs defaultValue="short" className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 overflow-x-auto px-4 pt-3 no-scrollbar sm:px-5">
+            <TabsList className="inline-flex h-auto w-max min-w-full justify-start gap-1 rounded-2xl bg-[#f3ecda] p-1">
+              <TabsTrigger value="short" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
+                Pe scurt
+              </TabsTrigger>
+              <TabsTrigger value="why" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
+                De ce
+              </TabsTrigger>
+              {isPro && pro ? (
+                <TabsTrigger value="pro" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
+                  Extra Pro
+                </TabsTrigger>
+              ) : null}
+              <TabsTrigger value="message" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
+                Mesaj
+              </TabsTrigger>
+            </TabsList>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5 sm:py-4">
+            <TabsContent value="short" className="mt-0 space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <DetailRow icon={MapPin} label="Distanță" value={lead.distance} />
+                <DetailRow icon={BadgeCheck} label="Potrivire" value={`${lead.match}%`} />
+                <DetailRow icon={CalendarDays} label="Moment bun" value={lead.bestDay} />
+                {lead.phone ? (
+                  <DetailRow
+                    icon={Phone}
+                    label="Telefon"
+                    value={lead.contactPerson ? `${lead.phone} · ${lead.contactPerson}` : lead.phone}
+                  />
+                ) : null}
               </div>
-            ) : null}
-          </TabsContent>
-          <TabsContent value="why" className="space-y-4">
-            <InfoBlock title="Îl recomand pentru că" text={lead.reason} />
-            {lead.needs?.length ? (
+              {lead.website ? (
+                <DetailLinkRow icon={Globe} label="Website" href={normalizeUrl(lead.website)} text={lead.website} />
+              ) : null}
+              {shortMenu ? (
+                <InfoBlock
+                  title={isVenue ? "Produse disponibile" : "Meniu / ofertă"}
+                  text={shortMenu}
+                />
+              ) : null}
+              {shortNotes && !isVenue ? (
+                <InfoBlock title="Informații din surse web" text={shortNotes} collapsible />
+              ) : null}
+              {isVenue && shortNotes ? (
+                <InfoBlock title="Detalii platformă" text={shortNotes} />
+              ) : null}
+              {shortSources.length && !isVenue ? (
+                <SourceUrlsList urls={shortSources} title="Surse online" initialCount={3} />
+              ) : null}
+            </TabsContent>
+
+            <TabsContent value="why" className="mt-0 space-y-3">
               <InfoBlock
-                title="Nevoi estimate"
-                text={lead.needs.join(", ")}
+                title={isVenue ? "Recomand pentru că" : "Îl recomand pentru că"}
+                text={isPro && pro?.extendedReason ? pro.extendedReason : lead.reason}
               />
+              {lead.needs?.length ? (
+                <InfoBlock
+                  title={isVenue ? "Produse oferite" : "Nevoi estimate"}
+                  text={lead.needs.join(", ")}
+                />
+              ) : null}
+              {(isPro && pro?.matchedNeeds?.length ? pro.matchedNeeds : lead.matchedNeeds)?.length ? (
+                <InfoBlock
+                  title={isVenue ? "Potrivire cu ce cauți" : "Potrivire cu produsele tale"}
+                  text={(isPro && pro?.matchedNeeds?.length ? pro.matchedNeeds : lead.matchedNeeds)!.join(", ")}
+                />
+              ) : null}
+              <InfoBlock title={isVenue ? "Oferă" : "Ai putea să-i vinzi"} text={lead.sell} />
+            </TabsContent>
+
+            {isPro && pro ? (
+              <TabsContent value="pro" className="mt-0 space-y-3">
+                {pro.statusTimeline.length ? <StatusTimeline steps={pro.statusTimeline} /> : null}
+                {pro.contactPerson ? (
+                  <DetailRow icon={UserRound} label="Persoană contact" value={pro.contactPerson} />
+                ) : null}
+                {pro.menuItems ? (
+                  <InfoBlock
+                    title={isVenue ? "Produse disponibile (extins)" : "Meniu / ofertă (extins)"}
+                    text={pro.menuItems}
+                  />
+                ) : null}
+                {pro.notes ? (
+                  <InfoBlock
+                    title={isVenue ? "Detalii platformă" : "Note din surse web"}
+                    text={pro.notes}
+                    collapsible={!isVenue}
+                  />
+                ) : null}
+                {pro.sourceUrls.length && !isVenue ? (
+                  <SourceUrlsList urls={pro.sourceUrls} title="Surse complete" initialCount={4} />
+                ) : null}
+              </TabsContent>
             ) : null}
-            {lead.matchedNeeds?.length ? (
-              <InfoBlock
-                title="Potrivire cu produsele tale"
-                text={lead.matchedNeeds.join(", ")}
-              />
-            ) : null}
-            <InfoBlock title="Ai putea să-i vinzi" text={lead.sell} />
-          </TabsContent>
-          <TabsContent value="message">
-            <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-4">
-              <p className="text-xs font-bold uppercase text-muted-foreground">Mesaj sugerat</p>
-              <p className="mt-2 text-sm leading-relaxed text-[#34422d]">{lead.contact}</p>
-            </div>
-          </TabsContent>
+
+            <TabsContent value="message" className="mt-0">
+              <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-4">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-[#6b715f]">
+                  Mesaj sugerat
+                </p>
+                <p className="mt-2 text-sm leading-relaxed text-[#34422d]">{lead.contact}</p>
+              </div>
+            </TabsContent>
+          </div>
         </Tabs>
       </DialogContent>
     </Dialog>
@@ -2162,13 +2524,13 @@ function ContactMessageDialog({
 
 function DetailRow({ icon: Icon, label, value }: { icon: typeof MapPin; label: string; value: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e9f0dc] text-[#4d6638]">
-        <Icon className="h-5 w-5" />
+    <div className="flex items-start gap-2.5 rounded-xl bg-[#f6f1e6] px-3 py-2.5">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e9f0dc] text-[#4d6638]">
+        <Icon className="h-4 w-4" />
       </div>
-      <div>
-        <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
-        <p className="text-sm font-semibold text-[#263421]">{value}</p>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-[#6b715f]">{label}</p>
+        <p className="text-sm font-semibold leading-snug text-[#263421]">{value}</p>
       </div>
     </div>
   );
@@ -2186,23 +2548,21 @@ function DetailLinkRow({
   text: string;
 }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#e9f0dc] text-[#4d6638]">
-        <Icon className="h-5 w-5" />
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2.5 rounded-xl bg-[#f6f1e6] px-3 py-2.5 transition hover:bg-[#efe8d8]"
+    >
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e9f0dc] text-[#4d6638]">
+        <Icon className="h-4 w-4" />
       </div>
-      <div className="min-w-0">
-        <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-sm font-semibold text-[#4d6638] underline-offset-2 hover:underline break-all"
-        >
-          {text}
-          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-        </a>
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-[#6b715f]">{label}</p>
+        <p className="truncate text-sm font-semibold text-[#4d6638]">{shortenUrl(text)}</p>
       </div>
-    </div>
+      <ExternalLink className="h-4 w-4 shrink-0 text-[#4d6638]" />
+    </a>
   );
 }
 
@@ -2211,12 +2571,139 @@ function normalizeUrl(url: string): string {
   return `https://${url.replace(/^\/+/, "")}`;
 }
 
-function InfoBlock({ title, text }: { title: string; text: string }) {
+function shortenUrl(url: string): string {
+  try {
+    const parsed = new URL(normalizeUrl(url));
+    const host = parsed.hostname.replace(/^www\./, "");
+    const path = parsed.pathname === "/" ? "" : parsed.pathname;
+    const label = `${host}${path}`;
+    return label.length > 48 ? `${label.slice(0, 48)}…` : label;
+  } catch {
+    return url.length > 48 ? `${url.slice(0, 48)}…` : url;
+  }
+}
+
+function formatSourceLabel(url: string, index: number): string {
+  if (url.includes("vertexaisearch.cloud.google.com")) {
+    return `Sursă web ${index + 1}`;
+  }
+  return shortenUrl(url);
+}
+
+function InfoBlock({
+  title,
+  text,
+  collapsible = false,
+}: {
+  title: string;
+  text: string;
+  collapsible?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 180;
+
   return (
-    <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-4">
-      <p className="text-sm font-bold text-[#263421]">{title}</p>
-      <p className="mt-1 text-sm leading-relaxed text-[#58644f]">{text}</p>
-    </div>
+    <section className="rounded-xl bg-[#f6f1e6] px-3 py-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-[#6b715f]">{title}</p>
+      <p
+        className={cn(
+          "mt-1.5 text-sm leading-relaxed text-[#34422d]",
+          collapsible && isLong && !expanded && "line-clamp-4",
+        )}
+      >
+        {text}
+      </p>
+      {collapsible && isLong ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-2 text-xs font-bold text-[#4d6638] hover:underline"
+        >
+          {expanded ? "Arată mai puțin" : "Citește tot"}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function SourceUrlsList({
+  urls,
+  title,
+  initialCount = 3,
+}: {
+  urls: string[];
+  title: string;
+  initialCount?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? urls : urls.slice(0, initialCount);
+  const hiddenCount = Math.max(0, urls.length - initialCount);
+
+  return (
+    <section className="rounded-xl bg-[#f6f1e6] px-3 py-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-[#6b715f]">
+        {title} ({urls.length})
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {visible.map((url, index) => (
+          <li key={`${url}-${index}`}>
+            <a
+              href={normalizeUrl(url)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-lg border border-[#e5dcc8] bg-white/80 px-2.5 py-2 text-sm font-semibold text-[#4d6638] transition hover:bg-white"
+            >
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">{formatSourceLabel(url, index)}</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          className="mt-2 text-xs font-bold text-[#4d6638] hover:underline"
+        >
+          {expanded ? "Ascunde sursele" : `Arată toate (${urls.length})`}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function StatusTimeline({
+  steps,
+}: {
+  steps: Array<{ step: LeadStatus; reached: boolean; current: boolean }>;
+}) {
+  return (
+    <section className="rounded-xl border border-[#c8d9aa] bg-[#f0f5e8] px-3 py-3">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-[#5a7150]">Istoric status</p>
+      <ol className="mt-3 space-y-2">
+        {steps.map((item) => (
+          <li
+            key={item.step}
+            className={cn(
+              "flex items-center gap-2 text-sm",
+              item.current
+                ? "font-bold text-[#3f532c]"
+                : item.reached
+                  ? "text-[#526047]"
+                  : "text-muted-foreground",
+            )}
+          >
+            <span
+              className={cn(
+                "h-2.5 w-2.5 rounded-full",
+                item.current ? "bg-[#4d6638]" : item.reached ? "bg-[#9aa587]" : "bg-[#d7ccb3]",
+              )}
+            />
+            {item.step}
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

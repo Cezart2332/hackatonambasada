@@ -10,7 +10,11 @@
     "dev:all": "concurrently \"npm run dev:server\" \"npm run dev:ai\" \"npm run dev\"",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "docker:up": "docker compose up -d",
+    "docker:build": "docker compose build",
+    "docker:rebuild": "docker compose build backend ai && docker compose up -d",
+    "docker:logs": "docker compose logs -f"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.10",

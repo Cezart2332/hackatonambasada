@@ -9,9 +9,6 @@ export type VenueProfileDto = {
   locationChoice: string | null;
   latitude: number | null;
   longitude: number | null;
-  productsNeeded: string;
-  supplyFrequency: string;
-  preferredDays: string;
   approvalStatus: "pending" | "approved" | "rejected";
 };
 
@@ -25,9 +22,6 @@ export function mapVenueProfile(profile: VenueProfile): VenueProfileDto {
     locationChoice: profile.locationChoice,
     latitude: profile.latitude,
     longitude: profile.longitude,
-    productsNeeded: profile.productsNeeded,
-    supplyFrequency: profile.supplyFrequency,
-    preferredDays: profile.preferredDays,
     approvalStatus:
       profile.approvalStatus === "APPROVED"
         ? "approved"

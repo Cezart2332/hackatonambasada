@@ -217,6 +217,34 @@ def _get_agent():
     return _agent
 
 
+def _is_corrupt_chat_history_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "tool_calls" in message or "toolmessage" in message
+
+
+def _reset_chat_thread(thread_id: str) -> None:
+    if hasattr(_checkpointer, "delete_thread"):
+        _checkpointer.delete_thread(thread_id)
+        logger.warning("Reset corrupt chat thread %s", thread_id)
+        return
+    logger.warning("Cannot reset chat thread %s — delete_thread unavailable", thread_id)
+
+
+def _invoke_agent(agent, user_content: str, config: dict):
+    payload = {"messages": [HumanMessage(content=user_content)]}
+    try:
+        return agent.invoke(payload, config=config)
+    except ValueError as exc:
+        if not _is_corrupt_chat_history_error(exc):
+            raise
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if not thread_id:
+            raise
+        logger.warning("Corrupt chat history for thread %s, retrying once", thread_id)
+        _reset_chat_thread(thread_id)
+        return agent.invoke(payload, config=config)
+
+
 def _extract_reply(messages: list) -> str:
     for msg in reversed(messages):
         if isinstance(msg, AIMessage):
@@ -263,10 +291,7 @@ def run_chat_turn(
             user_content = f"{message}\n\n[Profil curent: {profile_hint}]"
 
         config = {"configurable": {"thread_id": user_id}}
-        result = agent.invoke(
-            {"messages": [HumanMessage(content=user_content)]},
-            config=config,
-        )
+        result = _invoke_agent(agent, user_content, config)
 
         reply = _extract_reply(result.get("messages") or [])
         return ChatTurnResult(

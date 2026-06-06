@@ -16,6 +16,7 @@ from app.gemini import (
     _looks_like_official_venue_url,
     _parse_buyer_item,
     CURRENT_DATE_CONTEXT,
+    CURRENT_YEAR,
 )
 from app.geocode import geocode_business, geocode_city_center, haversine_km, infer_city_from_address
 from app.openrouter_client import chat_with_web
@@ -137,7 +138,7 @@ def search_node(state: DiscoveryState) -> dict:
     prompt = (
         f"Caută pe internet afaceri REALE din {state['locality']}, Dobrogea, România "
         f"(rază ~{state['range_km']:.0f} km, coordonate {state['latitude']:.3f}, {state['longitude']:.3f}).\n"
-        f"Context temporal obligatoriu: azi este {CURRENT_DATE_CONTEXT}; găsește doar venue-uri active/deschise în 2026.\n"
+        f"Context temporal obligatoriu: azi este {CURRENT_DATE_CONTEXT}; găsește doar venue-uri active/deschise în {CURRENT_YEAR}.\n"
         f"Categoria acestei runde: {category['label']}.\n"
         f"Include doar: {category['accepted']}.\n"
         f"Exclude pentru această rundă: {category['rejected']}.\n"

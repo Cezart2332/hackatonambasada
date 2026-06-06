@@ -2,11 +2,7 @@ import React from "react";
 import {
   Loader2,
   Check,
-  Home,
-  Phone,
-  MapPin,
   Plus,
-  Wheat,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,20 +13,6 @@ import { InventoryLineEditor } from "@/components/ProductEditor";
 import { LogoutSection } from "@/components/LogoutSection";
 import { PlanSection } from "@/components/PlanSection";
 import type { PlanContext, Profile, ProducerProduct } from "@/lib/types";
-
-function ProfileRow({ label, value, icon: Icon }: { label: string; value?: string; icon: typeof Wheat }) {
-  return (
-    <div className="flex items-center gap-3 rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#eaf0df] text-[#526b36]">
-        <Icon className="h-5 w-5" />
-      </div>
-      <div>
-        <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
-        <p className="text-sm font-semibold text-[#263421]">{value || "Încă nu am întrebat"}</p>
-      </div>
-    </div>
-  );
-}
 
 function ProfileProducts({
   products,
@@ -108,7 +90,7 @@ export function ProfilePage({
   onProductRemove: (productId: string) => void;
   onProductUpdate: (productId: string, key: keyof ProducerProduct, value: string) => void;
   onProductPatch: (productId: string, patch: Partial<ProducerProduct>) => void;
-  onProfileFieldChange: (key: "location" | "range" | "days", value: string) => void;
+  onProfileFieldChange: (key: "businessName" | "phone" | "location" | "range" | "days", value: string) => void;
 }) {
   return (
     <ScrollArea className="min-h-0 flex-1 bg-[#f7f3e8]">
@@ -147,9 +129,32 @@ export function ProfilePage({
             <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
               <p className="text-sm font-bold text-[#263421]">Date producător</p>
               <div className="mt-4 space-y-3">
-                <ProfileRow label="Gospodărie" value={profile.businessName} icon={Home} />
-                <ProfileRow label="Telefon" value={profile.phone} icon={Phone} />
-                <ProfileRow label="Localitate" value={profile.location} icon={MapPin} />
+                <FieldBlock label="Gospodărie / Firmă">
+                  <Input
+                    value={profile.businessName || ""}
+                    onChange={(event) => onProfileFieldChange("businessName", event.target.value)}
+                    placeholder="Ex: Stupina Ionescu"
+                  />
+                </FieldBlock>
+                <FieldBlock label="Telefon">
+                  <Input
+                    value={profile.phone || ""}
+                    onChange={(event) => onProfileFieldChange("phone", event.target.value)}
+                    placeholder="Ex: +40712345678"
+                  />
+                </FieldBlock>
+                <FieldBlock label="Localitate">
+                  <Input
+                    value={profile.location || ""}
+                    onChange={(event) => onProfileFieldChange("location", event.target.value)}
+                    placeholder="Ex: Babadag"
+                    disabled
+                    className="opacity-60 cursor-not-allowed"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Localitate setată din căutarea pe hartă (secțiunea Livrare).
+                  </p>
+                </FieldBlock>
               </div>
             </div>
 

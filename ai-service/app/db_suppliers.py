@@ -199,12 +199,17 @@ def list_suppliers_in_area(area_key: str) -> list[dict[str, Any]]:
 
 
 def list_interacted_supplier_ids(venue_user_id: str) -> set[str]:
+    """Return supplier IDs where the venue has taken a real action.
+    'shown' does NOT count — those can be shown again on next request.
+    Only exclude: contacted, responded, bought, good, not_relevant.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT supplier_location_id FROM venue_supplier_interaction
                 WHERE venue_user_id = %s
+                  AND status IN ('contacted', 'responded', 'bought', 'good', 'not_relevant')
                 """,
                 (venue_user_id,),
             )

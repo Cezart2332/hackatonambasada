@@ -96,15 +96,25 @@ def ensure_area_researched(
     if discover_more and user_id:
         exclude_names = [row["name"] for row in db.list_producer_buyers(user_id)]
 
+    existing_buyers = db.list_buyers_in_area(area_key)
+    has_any_data = len(existing_buyers) > 0
+
+    # Use cached data if: area has any results AND (it's fresh OR we have enough buyers)
+    # Only do a full re-research if forced, discover_more requested, or area is completely empty.
     cache_eligible = (
         not force_refresh
         and not discover_more
+        and has_any_data
         and db.is_area_fresh(area_key)
-        and db.area_has_rich_data(area_key)
-        and db.area_has_geocoded_data(area_key, latitude, longitude, radius_km)
     )
     if cache_eligible:
-        logger.info("Area cache hit for %s (rich data)", area_key)
+        logger.info("Area cache hit for %s (%d buyers)", area_key, len(existing_buyers))
+        return area_key
+
+    # If area has data but TTL expired, still use cached data and trigger background refresh
+    # For now: if data exists and we're not force-refreshing, reuse it (TTL handles weekly reset)
+    if has_any_data and not force_refresh and not discover_more:
+        logger.info("Area %s: TTL expired but has %d buyers — reusing cache", area_key, len(existing_buyers))
         return area_key
 
     logger.info(

@@ -18,7 +18,20 @@ from app.taxonomy import normalize_needs, needs_to_text
 
 logger = logging.getLogger(__name__)
 
-CURRENT_DATE_CONTEXT = "6 iunie 2026"
+import datetime
+
+def get_romanian_date_context() -> tuple[str, int]:
+    months_ro = {
+        1: "ianuarie", 2: "februarie", 3: "martie", 4: "aprilie",
+        5: "mai", 6: "iunie", 7: "iulie", 8: "august",
+        9: "septembrie", 10: "octombrie", 11: "noiembrie", 12: "decembrie"
+    }
+    today = datetime.date.today()
+    date_str = f"{today.day} {months_ro[today.month]} {today.year}"
+    return date_str, today.year
+
+CURRENT_DATE_CONTEXT, CURRENT_YEAR = get_romanian_date_context()
+
 
 ALLOWED_BUYER_TYPES = {
     "restaurant",
@@ -92,7 +105,7 @@ SOCIAL_OFFICIAL_DOMAINS = {
 }
 
 JSON_SCHEMA_HINT = """
-Return a JSON array. Each object MUST describe a currently active buyer venue in 2026 and MUST use only information found in web search results:
+Return a JSON array. Each object MUST describe a currently active buyer venue in {CURRENT_YEAR} and MUST use only information found in web search results:
 {
   "name": "exact business name",
   "type": "restaurant | hotel | pensiune | cafe | cofetarie | patiserie | bistro | catering | shop | deli | supermarket",
@@ -108,7 +121,7 @@ Return a JSON array. Each object MUST describe a currently active buyer venue in
   "source_urls": ["urls where info was found"]
 }
 Rules:
-- Current date context is 2026. ONLY include venues that appear active/open in 2026.
+- Current date context is {CURRENT_YEAR}. ONLY include venues that appear active/open in {CURRENT_YEAR}.
 - ONLY include buyer venues: restaurants, hotels, pensiuni, cafés, bakeries/patisseries, bistros, catering/cantines, delis, grocery shops, supermarkets.
 - DO NOT include public markets/piețe, farmers markets, generic market halls, press articles, tourism guide entries, event pages, listings/directories, Google Maps-only results, or articles about places.
 - Every item MUST have an official venue URL in "website": own domain, official Facebook page, or official Instagram page. If you cannot find an official URL, omit the venue entirely.
@@ -119,7 +132,7 @@ Rules:
 - phone must be copied exactly from a web source; if not found, use empty string. NEVER guess.
 - menuItems must come from actual menus/pages when possible, not generic guesses.
 - If a field is unknown, use empty string — never use N/A or placeholder text.
-"""
+""".replace("{CURRENT_YEAR}", str(CURRENT_YEAR))
 
 
 @dataclass
@@ -435,7 +448,7 @@ def _enrich_buyer_details(draft: BuyerDraft, locality: str) -> None:
 
     prompt = (
         f"Caută pe internet afacerea „{draft.name}” din {locality}, România.\n"
-        f"Context temporal: azi este {CURRENT_DATE_CONTEXT}; verifică doar informații actuale/active în 2026.\n"
+        f"Context temporal: azi este {CURRENT_DATE_CONTEXT}; verifică doar informații actuale/active în {CURRENT_YEAR}.\n"
         "Folosește web search și web fetch. Găsește: adresa completă, site/Facebook/Instagram OFICIAL, "
         "telefon public (doar dacă e listat), meniu/produse. Nu folosi articole de presă sau directoare ca website.\n"
         'Răspunde DOAR JSON: {"address":"","website":"","phone":"","contactPerson":"","menuItems":"","notes":""}\n'
@@ -510,7 +523,7 @@ def research_area(
     search_prompt = (
         f"Caută pe internet afaceri REALE din {locality}, Dobrogea, România "
         f"(rază ~{radius_km:.0f} km în jurul coordonatelor {latitude:.3f}, {longitude:.3f}).\n"
-        f"Context temporal: azi este {CURRENT_DATE_CONTEXT}; caută venue-uri active/deschise în 2026.\n"
+        f"Context temporal: azi este {CURRENT_DATE_CONTEXT}; caută venue-uri active/deschise în {CURRENT_YEAR}.\n"
         "Tipuri acceptate: restaurante, hoteluri, pensiuni, cafenele, cofetării/patiserii, bistrouri, catering/cantine, supermarketuri, magazine alimentare, băcănii.\n"
         "Exclude complet: piețe/târguri/hale, articole de presă, ghiduri turistice, directoare/listări, Google Maps-only, evenimente.\n"
         "Folosește web search și web fetch pentru site-uri oficiale, meniuri și pagini de contact.\n"
@@ -559,8 +572,13 @@ def research_area(
 
         geo = geocode_business(draft.name, draft.address, draft.city or locality)
         if not geo:
-            logger.warning("Skipping %s — could not geocode %r", draft.name, draft.address)
-            continue
+            # Fallback: try to pin to city center rather than discard the business
+            from app.geocode import geocode_city_center
+            geo = geocode_city_center(draft.city or locality)
+            if not geo:
+                logger.warning("Skipping %s — could not geocode %r (even city center failed)", draft.name, draft.address)
+                continue
+            logger.info("Using city-center fallback for %s (%s)", draft.name, draft.city or locality)
 
         dist_km = haversine_km(latitude, longitude, geo.latitude, geo.longitude)
         if dist_km > radius_km * 1.3:

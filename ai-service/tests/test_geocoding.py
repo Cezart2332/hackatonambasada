@@ -329,7 +329,7 @@ class GeocodingTests(unittest.TestCase):
         self.assertIn("Categoria acestei runde: RESTAURANTE.", prompts[0])
         self.assertIn("Include doar: restaurante", prompts[0])
         self.assertIn("Categoria acestei runde: HOTELURI ȘI PENSIUNI.", prompts[1])
-        self.assertIn("Dovada minimă acceptată", prompts[1])
+        self.assertIn("Dovada preferată", prompts[1])
 
     def test_discovery_graph_runs_through_all_categories_before_ending(self) -> None:
         state = {
@@ -418,7 +418,7 @@ class GeocodingTests(unittest.TestCase):
 
         self.assertIsNone(draft)
 
-    def test_news_article_url_is_not_accepted_as_official_website(self) -> None:
+    def test_news_article_url_is_dropped_but_venue_can_still_be_accepted(self) -> None:
         item = {
             "name": "Restaurant Pontica",
             "type": "restaurant",
@@ -438,7 +438,58 @@ class GeocodingTests(unittest.TestCase):
             research_text="",
         )
 
-        self.assertIsNone(draft)
+        self.assertIsNotNone(draft)
+        self.assertEqual(draft.website, "")
+        self.assertEqual(draft.source_urls, [])
+
+    def test_venue_without_links_is_accepted_for_geocoding(self) -> None:
+        item = {
+            "name": "Restaurant Fără Site",
+            "type": "restaurant",
+            "city": "Constanța",
+            "address": "Strada Unirii 29, Constanța, România",
+            "needs": ["cheese"],
+            "summary": "Venue real găsit cu adresă publică.",
+        }
+
+        draft = _parse_buyer_item(
+            item,
+            locality="Dobrogea",
+            latitude=44.17,
+            longitude=28.63,
+            fallback_urls=[],
+            research_text="",
+        )
+
+        self.assertIsNotNone(draft)
+        self.assertEqual(draft.website, "")
+        self.assertEqual(draft.source_urls, [])
+
+    def test_google_maps_is_relevant_source_but_not_website(self) -> None:
+        maps_url = "https://www.google.com/maps/place/Restaurant+Bueno"
+        item = {
+            "name": "Restaurant Bueno",
+            "type": "restaurant",
+            "city": "Constanța",
+            "address": "Bulevardul Tomis 55, Constanța, România",
+            "website": maps_url,
+            "source_urls": [maps_url, "https://ziuaconstanta.ro/stiri/restaurant-bueno.html"],
+            "needs": ["vegetables", "cheese"],
+            "summary": "Venue activ cu adresă publică.",
+        }
+
+        draft = _parse_buyer_item(
+            item,
+            locality="Dobrogea",
+            latitude=44.17,
+            longitude=28.63,
+            fallback_urls=[],
+            research_text="",
+        )
+
+        self.assertIsNotNone(draft)
+        self.assertEqual(draft.website, "")
+        self.assertEqual(draft.source_urls, [maps_url])
 
     def test_official_venue_website_is_accepted(self) -> None:
         item = {

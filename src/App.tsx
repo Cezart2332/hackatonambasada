@@ -12,19 +12,34 @@ import {
   Coffee,
   Droplets,
   Handshake,
+  Home,
+  KeyRound,
+  Leaf,
+  Loader2,
+  LockKeyhole,
+  Mail,
   MapPin,
   Menu,
   MessageCircle,
   Milk,
+  Navigation,
   PackageCheck,
+  Phone,
+  Plus,
   Send,
+  ShieldCheck,
+  Search,
   Sparkles,
+  Store,
   ThumbsDown,
+  Trash2,
   Truck,
   Utensils,
+  UserRound,
   Wheat,
   Wine,
   X,
+  AlertTriangle,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -39,53 +54,34 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth-client";
+import { api, apiProfileToFrontend, setupToApiPayload, summarizeProducts } from "@/lib/api";
+import { messageFromAuthError, messageFromUnknownError } from "@/lib/errors";
+import type {
+  AppScreen,
+  ChatMessage,
+  DashboardView,
+  Lead,
+  LeadStatus,
+  LocationChoice,
+  ProducerAccount,
+  ProducerProduct,
+  ProducerSetup,
+  Profile,
+  ProfileKey,
+} from "@/lib/types";
 
-type ProfileKey = "product" | "quantity" | "location" | "range" | "days";
-
-type Profile = Partial<Record<ProfileKey, string>>;
-
-type ChatMessage =
-  | {
-      id: string;
-      role: "agent" | "user";
-      kind: "text";
-      text: string;
-      time: string;
-    }
-  | {
-      id: string;
-      role: "agent";
-      kind: "lead";
-      leadId: string;
-      time: string;
-    };
-
-type LeadStatus = "Bun" | "Nu e potrivit" | "Contactat" | "A răspuns" | "A cumpărat";
-
-type Lead = {
-  id: string;
-  name: string;
-  type: string;
-  location: string;
-  distance: string;
-  match: number;
-  reason: string;
-  sell: string;
-  bestDay: string;
-  contact: string;
-  tone: string;
-  icon: "restaurant" | "hotel" | "cafe" | "shop" | "deli";
-};
+// Page and Component Imports
+import { AuthScreen } from "@/pages/AuthScreen";
+import { ProducerOnboardingScreen } from "@/pages/ProducerOnboardingScreen";
+import { ProfilePage } from "@/pages/ProfilePage";
+import { LeadMapPanel, StatusBadge } from "@/pages/LeadMapPanel";
+import { AgentAvatar } from "@/components/AgentAvatar";
+import { createProduct } from "@/components/ProductEditor";
+import { LocationSearch } from "@/components/LocationSearch";
+import { SectionLabel, FieldBlock, QuickChoiceRow } from "@/components/FormBlocks";
 
 const onboardingSteps: Array<{
   key: ProfileKey;
@@ -122,84 +118,6 @@ const onboardingSteps: Array<{
     question: "În ce zile poți livra cel mai ușor?",
     placeholder: "Ex: marți și vineri dimineața",
     quickReplies: ["Marți dimineața", "Joi după-amiază", "Vineri dimineața", "Weekend"],
-  },
-];
-
-const demoLeads: Lead[] = [
-  {
-    id: "lead-1",
-    name: "Casa Dobrogeană",
-    type: "restaurant cu meniu local",
-    location: "Constanța, zona Peninsulă",
-    distance: "28 km",
-    match: 94,
-    reason: "are mic dejun local și menționează furnizori din Dobrogea în meniu.",
-    sell: "borcane mici pentru mic dejun, platouri cu brânzeturi sau cadouri pentru turiști.",
-    bestDay: "Marți dimineața, înainte de pregătirea meniului de prânz.",
-    contact:
-      "Bună ziua, sunt producător local din Dobrogea și am văzut că puneți accent pe produse locale în meniu. Săptămâna aceasta am disponibilă miere proaspătă, potrivită pentru mic dejun și deserturi. Dacă vă este util, vă pot trimite o listă scurtă cu cantități și prețuri.",
-    tone: "cald, direct, potrivit pentru un restaurant care lucrează cu produse locale",
-    icon: "restaurant",
-  },
-  {
-    id: "lead-2",
-    name: "Hotel Sulina International",
-    type: "hotel de litoral",
-    location: "Mamaia",
-    distance: "34 km",
-    match: 89,
-    reason: "servește turiști la mic dejun și poate cumpăra produse locale ambalate simplu.",
-    sell: "miere porționată, brânzeturi pentru bufet sau pachete de bun venit.",
-    bestDay: "Joi după-amiază, când pregătesc aprovizionarea pentru weekend.",
-    contact:
-      "Bună ziua, sunt producător local din Dobrogea. Am văzut că primiți mulți turiști pe litoral și cred că produsele locale ar merge bine la micul dejun sau în pachete de bun venit. Săptămâna aceasta am marfă disponibilă și pot livra în Mamaia. Vă pot trimite câteva opțiuni simple?",
-    tone: "politicos, orientat spre sezon și turiști",
-    icon: "hotel",
-  },
-  {
-    id: "lead-3",
-    name: "Cafeneaua Arabica",
-    type: "cafenea",
-    location: "Constanța, Tomis Nord",
-    distance: "24 km",
-    match: 83,
-    reason: "vinde cafea, deserturi și produse mici de luat acasă pentru clienți fideli.",
-    sell: "miere pentru ceai, prăjituri, cutii mici sau borcane la raft.",
-    bestDay: "Vineri dimineața, când traficul de weekend crește.",
-    contact:
-      "Bună ziua, sunt producător local din Dobrogea. Am văzut că aveți cafenea în Constanța și cred că mierea locală ar merge bine lângă ceai, cafea sau deserturi. Am câteva borcane pregătite pentru livrare săptămâna aceasta. Pot să vă trimit detaliile?",
-    tone: "scurt, uman, fără presiune",
-    icon: "cafe",
-  },
-  {
-    id: "lead-4",
-    name: "Băcănia Pontica",
-    type: "băcănie cu produse locale",
-    location: "Eforie Nord",
-    distance: "41 km",
-    match: 81,
-    reason: "vinde produse pentru turiști și are raft dedicat pentru producători locali.",
-    sell: "borcane etichetate, loturi mici pentru test sau pachete mixte.",
-    bestDay: "Miercuri, înainte de aprovizionarea pentru final de săptămână.",
-    contact:
-      "Bună ziua, sunt producător local din Dobrogea și am produse disponibile pentru livrare săptămâna aceasta. Am văzut că lucrați cu produse locale pentru turiști și cred că mierea mea s-ar potrivi bine la raft. Vă pot trimite cantitățile și câteva poze?",
-    tone: "practic, bun pentru un magazin care testează loturi mici",
-    icon: "shop",
-  },
-  {
-    id: "lead-5",
-    name: "Delicatese Tomitana",
-    type: "delicatese și vinuri",
-    location: "Mangalia",
-    distance: "56 km",
-    match: 76,
-    reason: "asociază vinuri dobrogene cu brânzeturi, miere și produse cadou.",
-    sell: "pachete cu miere, brânzeturi maturate sau recomandări pentru degustări.",
-    bestDay: "Luni sau joi, când pregătesc comenzile pentru clienți.",
-    contact:
-      "Bună ziua, sunt producător local din Dobrogea. Am văzut că aveți delicatese și vinuri, iar produsele mele s-ar putea potrivi în pachete locale sau degustări. Săptămâna aceasta pot livra în Mangalia. Vă pot trimite o ofertă scurtă?",
-    tone: "premium, dar simplu și natural",
-    icon: "deli",
   },
 ];
 
@@ -240,7 +158,62 @@ const productIcons = [
   { label: "hartă", icon: MapPin, className: "bg-[#e9efd8] text-[#4e6536]" },
 ];
 
+
+const enrichedMockDetails: Record<string, Partial<Lead>> = {
+  "lead-1": {
+    phone: "+40 722 334 455",
+    contactPerson: "Alexandru Radu (Manager)",
+    menuItems: "Clătite dobrogene, mic dejun tradițional, platou brânzeturi, salate",
+    supplyFrequency: "Săptămânal (preferă Marțea și Vinerea)",
+    notes: "Prețuiesc ingredientele autohtone cu poveste locală."
+  },
+  "lead-2": {
+    phone: "+40 733 445 566",
+    contactPerson: "Elena Sandu (Aprovizionare)",
+    menuItems: "Mic dejun bufet suedez, restaurant interior, bar piscină",
+    supplyFrequency: "Bilunar în cantități mari (minim 100 kg/livrare)",
+    notes: "Au nevoie de facturare rapidă și livrări programate exact dimineața."
+  },
+  "lead-3": {
+    phone: "+40 744 556 677",
+    contactPerson: "Mihai Popa (Proprietar)",
+    menuItems: "Cafea de origine, cheesecake, tarte, ceaiuri bio",
+    supplyFrequency: "Săptămânal (livrări de 10-15 borcane)",
+    notes: "Folosesc miere ca îndulcitor natural premium pentru specialități de cafea și ceai."
+  },
+  "lead-4": {
+    phone: "+40 755 667 788",
+    contactPerson: "Ioana Radu (Magazin)",
+    menuItems: "Brânzeturi maturate, vinuri locale, dulcețuri artizanale, miere",
+    supplyFrequency: "La nevoie (refacere stoc o dată la 2-3 săptămâni)",
+    notes: "Magazin boutique. Preferă borcane etichetate curat și ambalaje aspectuoase pentru cadouri."
+  },
+  "lead-5": {
+    phone: "+40 766 778 899",
+    contactPerson: "Andrei Stan (Chef Bucătar)",
+    menuItems: "Platouri gourmet, sosuri glaze cu miere, deserturi fine, brânzeturi",
+    supplyFrequency: "Săptămânal, preferă livrarea joia",
+    notes: "Caută brânzeturi premium de vacă sau oaie și miere de salcâm pentru sosuri caramelizate."
+  }
+};
+
+const enrichLeads = (rawLeads: Lead[]): Lead[] => {
+  return rawLeads.map(lead => ({
+    ...lead,
+    ...(enrichedMockDetails[lead.id] || {
+      phone: "+40 722 000 000",
+      contactPerson: "Manager Aprovizionare",
+      menuItems: "Preparate generale din meniu",
+      supplyFrequency: "De stabilit",
+      notes: "Interesat de testarea calității produselor."
+    })
+  }));
+};
+
 function App() {
+  const [screen, setScreen] = useState<AppScreen>("auth");
+  const [account, setAccount] = useState<ProducerAccount | null>(null);
+  const [dashboardView, setDashboardView] = useState<DashboardView>("chat");
   const [activeConversation, setActiveConversation] = useState("warm");
   const [mobileChatOpen, setMobileChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -248,7 +221,7 @@ function App() {
       id: "m-1",
       role: "agent",
       kind: "text",
-      text: "Bună! Eu sunt Warm Leads. Te ajut să găsești afaceri locale care ar putea cumpăra de la tine săptămâna asta.",
+      text: "Bună! Te ajut să găsești afaceri locale care ar putea cumpăra de la tine săptămâna asta.",
       time: "09:30",
     },
     {
@@ -264,9 +237,19 @@ function App() {
   const [input, setInput] = useState("");
   const [typing, setTyping] = useState(false);
   const [leadStatuses, setLeadStatuses] = useState<Record<string, LeadStatus>>({});
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [authChecking, setAuthChecking] = useState(true);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [messageLead, setMessageLead] = useState<Lead | null>(null);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [messageDraftLoading, setMessageDraftLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const [failedFeedbacks, setFailedFeedbacks] = useState<Record<string, string>>({});
+  const [failedLeadDialog, setFailedLeadDialog] = useState<Lead | null>(null);
+  const [customFailedReason, setCustomFailedReason] = useState("");
 
   const onboardingDone = currentStep >= onboardingSteps.length;
   const step = onboardingSteps[currentStep];
@@ -279,6 +262,50 @@ function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, typing, leadStatuses]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreSession() {
+      try {
+        const { data } = await authClient.getSession();
+        if (!data?.user || cancelled) {
+          return;
+        }
+
+        const user = data.user;
+        setAccount({ name: user.name, email: user.email });
+
+        const dto = await api.getProfile();
+        const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
+        setProfile(restoredProfile);
+
+        const { leads: storedLeads } = await api.listLeads();
+        if (!cancelled) {
+          setLeads(enrichLeads(storedLeads));
+          const statuses: Record<string, LeadStatus> = {};
+          for (const lead of storedLeads) {
+            if (lead.status) statuses[lead.id] = lead.status;
+          }
+          setLeadStatuses(statuses);
+        }
+
+        setScreen("chat");
+        setDashboardView("chat");
+      } catch {
+        // stay on auth screen
+      } finally {
+        if (!cancelled) setAuthChecking(false);
+      }
+    }
+
+    restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const displayLeadCount = activeLeadCount || leads.length;
 
   function now() {
     return new Intl.DateTimeFormat("ro-RO", {
@@ -304,28 +331,317 @@ function App() {
     }, delay);
   }
 
-  function addRecommendations(delay = 740) {
+  async function handleWhatsAppRedirect(lead: Lead) {
+    let textMsg = lead.contact;
+    if (messageLead?.id === lead.id && messageDraft) {
+      textMsg = messageDraft;
+    } else {
+      const productSummary = summarizeProducts(profile.products);
+      try {
+        const { message } = await api.draftMessage({
+          businessName: lead.name,
+          productSummary: productSummary.full || profile.product || "",
+          locality: profile.location || "",
+          tone: lead.tone,
+        });
+        textMsg = message;
+      } catch {
+        textMsg = lead.contact;
+      }
+    }
+    const phoneNum = lead.phone?.replace(/[+\s-]/g, "") || "40722123456";
+    window.open(`https://wa.me/${phoneNum}?text=${encodeURIComponent(textMsg)}`, "_blank");
+  }
+
+  function handleFailedContactSubmit(leadId: string, reason: string) {
+    if (!reason.trim()) return;
+    setFailedFeedbacks((prev) => ({ ...prev, [leadId]: reason }));
+    setLeadStatuses((prev) => ({ ...prev, [leadId]: "Nu e potrivit" }));
+    void api.updateLeadStatus(leadId, "Nu e potrivit").catch(() => undefined);
+
+    const targetLead = leads.find((l) => l.id === leadId);
+    if (targetLead) {
+      addAgentText(
+        `Am înțeles. Am marcat ${targetLead.name} ca fiind nepotrivit deoarece: "${reason}". Am stocat acest feedback în memoria AI ca să excludem afaceri similare din recomandările viitoare.`,
+        360
+      );
+    }
+    setFailedLeadDialog(null);
+    setCustomFailedReason("");
+  }
+
+  async function addOnboardingAgentReply(stepKey: string, userAnswer: string, fallback: string) {
     setTyping(true);
-    window.setTimeout(() => {
+    try {
+      const productSummary = summarizeProducts(profile.products);
+      const { reply } = await api.chatReply({
+        step: stepKey,
+        userAnswer,
+        profileHint: productSummary.full || profile.product,
+      });
       setMessages((items) => [
         ...items,
         {
           id: crypto.randomUUID(),
           role: "agent",
           kind: "text",
-          text: "Am găsit câteva locuri bune. Îți las mai jos lead-urile și de ce cred că merită încercate.",
+          text: reply,
           time: now(),
         },
-        ...demoLeads.map<ChatMessage>((lead) => ({
+      ]);
+    } catch {
+      setMessages((items) => [
+        ...items,
+        {
           id: crypto.randomUUID(),
           role: "agent",
-          kind: "lead",
-          leadId: lead.id,
+          kind: "text",
+          text: fallback,
           time: now(),
-        })),
+        },
       ]);
+    } finally {
       setTyping(false);
+    }
+  }
+
+  function openMessageLead(lead: Lead) {
+    setMessageLead(lead);
+    setMessageDraft(lead.contact);
+    setMessageDraftLoading(true);
+
+    const productSummary = summarizeProducts(profile.products);
+    void api
+      .draftMessage({
+        businessName: lead.name,
+        productSummary: productSummary.full || profile.product || "",
+        locality: profile.location || "",
+        tone: lead.tone,
+      })
+      .then(({ message }) => setMessageDraft(message))
+      .catch(() => setMessageDraft(lead.contact))
+      .finally(() => setMessageDraftLoading(false));
+  }
+
+  async function saveProfile() {
+    setProfileSaving(true);
+    setProfileSaved(false);
+    setProfileSaveError(null);
+    try {
+      const dto = await api.updateProfile(setupToApiPayload(profile));
+      setProfile((current) =>
+        apiProfileToFrontend(dto, {
+          producerName: current.producerName,
+          businessName: current.businessName,
+          phone: current.phone,
+        }),
+      );
+      setProfileSaved(true);
+    } catch (error) {
+      setProfileSaved(false);
+      setProfileSaveError(messageFromUnknownError(error, "Nu am putut salva profilul. Încearcă din nou."));
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function addRecommendations(delay = 740) {
+    setTyping(true);
+    window.setTimeout(async () => {
+      try {
+        const { leads: matchedLeads } = await api.matchLeads();
+        setLeads(enrichLeads(matchedLeads));
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text:
+              matchedLeads.length > 0
+                ? "Am găsit câteva locuri bune. Îți las mai jos lead-urile și de ce cred că merită încercate."
+                : "Nu am găsit lead-uri în raza ta acum. Mărește raza de livrare sau actualizează localitatea din profil.",
+            time: now(),
+          },
+          ...matchedLeads.map<ChatMessage>((lead) => ({
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "lead",
+            leadId: lead.id,
+            time: now(),
+          })),
+        ]);
+      } catch (error) {
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text: messageFromUnknownError(
+              error,
+              "Nu am putut încărca lead-urile. Verifică conexiunea la server.",
+            ),
+            time: now(),
+          },
+        ]);
+      } finally {
+        setTyping(false);
+      }
     }, delay);
+  }
+
+  function findNextStepIndex(nextProfile: Profile, startIndex: number) {
+    const nextIndex = onboardingSteps.findIndex((item, index) => index >= startIndex && !nextProfile[item.key]);
+    return nextIndex === -1 ? onboardingSteps.length : nextIndex;
+  }
+
+  function startChatWithProfile(nextProfile: Profile, producerName?: string) {
+    const firstStepIndex = findNextStepIndex(nextProfile, 0);
+    const greetingName = producerName ? `, ${producerName}` : "";
+    const productSummary = summarizeProducts(nextProfile.products);
+    const introMessages: ChatMessage[] = [
+      {
+        id: crypto.randomUUID(),
+        role: "agent",
+        kind: "text",
+        text: `Bun venit${greetingName}. Am pregătit profilul tău de producător și îl folosesc ca să caut lead-uri potrivite.`,
+        time: now(),
+      },
+    ];
+
+    if (nextProfile.product || nextProfile.location || nextProfile.range) {
+      introMessages.push({
+        id: crypto.randomUUID(),
+        role: "agent",
+        kind: "text",
+        text: `Am notat: ${productSummary.full || nextProfile.product || "produse locale"} din ${nextProfile.location || "Dobrogea"}, cu livrare până la ${nextProfile.range || "în apropiere"}.`,
+        time: now(),
+      });
+    }
+
+    if (firstStepIndex < onboardingSteps.length) {
+      introMessages.push({
+        id: crypto.randomUUID(),
+        role: "agent",
+        kind: "text",
+        text: onboardingSteps[firstStepIndex].question,
+        time: now(),
+      });
+    } else {
+      introMessages.push({
+        id: crypto.randomUUID(),
+        role: "agent",
+        kind: "text",
+        text: "Profilul e complet. Îți arăt câteva locuri care ar putea cumpăra de la tine săptămâna asta.",
+        time: now(),
+      });
+    }
+
+    setProfile(nextProfile);
+    setMessages(introMessages);
+    setCurrentStep(firstStepIndex);
+    setTyping(false);
+    setMobileChatOpen(false);
+    setDashboardView("chat");
+    setScreen("chat");
+
+    if (firstStepIndex >= onboardingSteps.length) {
+      addRecommendations(680);
+    }
+  }
+
+  async function handleLogin(email: string, password: string) {
+    const result = await authClient.signIn.email({ email, password });
+    if (result.error) {
+      throw new Error(messageFromAuthError(result.error));
+    }
+
+    const user = result.data!.user;
+    setAccount({ name: user.name, email: user.email });
+
+    const dto = await api.getProfile();
+    const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
+    startChatWithProfile(restoredProfile, user.name);
+  }
+
+  async function handleRegister(email: string, password: string, setup: ProducerSetup) {
+    const name = setup.producerName.trim() || "Producător local";
+    const result = await authClient.signUp.email({ email, password, name });
+    if (result.error) {
+      throw new Error(messageFromAuthError(result.error));
+    }
+
+    setAccount({ name, email });
+    await api.updateProfile(setupToApiPayload(setup));
+
+    const productSummary = summarizeProducts(setup.products);
+    startChatWithProfile(
+      {
+        producerName: setup.producerName,
+        businessName: setup.businessName,
+        phone: setup.phone,
+        products: setup.products,
+        product: productSummary.product,
+        quantity: productSummary.quantity,
+        location: setup.location,
+        locationChoice: setup.locationChoice,
+        range: setup.range,
+        days: setup.days,
+      },
+      name,
+    );
+  }
+
+  function handleProducerOnboarding(setup: ProducerSetup) {
+    const productSummary = summarizeProducts(setup.products);
+
+    startChatWithProfile(
+      {
+        producerName: setup.producerName,
+        businessName: setup.businessName,
+        phone: setup.phone,
+        products: setup.products,
+        product: productSummary.product,
+        quantity: productSummary.quantity,
+        location: setup.location,
+        locationChoice: setup.locationChoice,
+        range: setup.range,
+        days: setup.days,
+      },
+      setup.producerName || account?.name,
+    );
+  }
+
+  function applyProfileProducts(nextProducts: ProducerProduct[]) {
+    const safeProducts = nextProducts.length ? nextProducts : [createProduct({ name: "Produs local" })];
+    const productSummary = summarizeProducts(safeProducts);
+
+    setProfile((current) => ({
+      ...current,
+      products: safeProducts,
+      product: productSummary.product,
+      quantity: productSummary.quantity,
+    }));
+  }
+
+  function updateProfileProduct(productId: string, key: keyof ProducerProduct, value: string) {
+    const nextProducts = (profile.products || []).map((product) =>
+      product.id === productId ? { ...product, [key]: value } : product,
+    );
+    applyProfileProducts(nextProducts);
+  }
+
+  function addProfileProduct() {
+    applyProfileProducts([...(profile.products || []), createProduct({ availableFrom: profile.days || "Săptămâna asta" })]);
+  }
+
+  function removeProfileProduct(productId: string) {
+    applyProfileProducts((profile.products || []).filter((product) => product.id !== productId));
+  }
+
+  function updateProfileField(key: "location" | "range" | "days", value: string) {
+    setProfile((current) => ({ ...current, [key]: value }));
   }
 
   function handleAnswer(value: string) {
@@ -333,8 +649,8 @@ function App() {
     if (!cleanValue || !step || typing) return;
 
     const answeredStep = step;
-    const nextStepIndex = currentStep + 1;
     const nextProfile = { ...profile, [answeredStep.key]: cleanValue };
+    const nextStepIndex = findNextStepIndex(nextProfile, currentStep + 1);
 
     setInput("");
     setProfile(nextProfile);
@@ -351,14 +667,20 @@ function App() {
     setCurrentStep(nextStepIndex);
 
     if (nextStepIndex < onboardingSteps.length) {
-      addAgentText(onboardingSteps[nextStepIndex].question);
+      void addOnboardingAgentReply(
+        answeredStep.key,
+        cleanValue,
+        onboardingSteps[nextStepIndex].question,
+      );
       return;
     }
 
-    addAgentText(
+    void addOnboardingAgentReply(
+      answeredStep.key,
+      cleanValue,
       `Perfect. Am notat: ${nextProfile.product}, ${nextProfile.quantity}, din ${nextProfile.location}, livrare ${nextProfile.range}, în zilele ${nextProfile.days}.`,
-      520,
     );
+    void api.updateProfile(setupToApiPayload(nextProfile)).catch(() => undefined);
     addRecommendations(1100);
   }
 
@@ -369,6 +691,7 @@ function App() {
 
   function updateLeadStatus(lead: Lead, status: LeadStatus) {
     setLeadStatuses((current) => ({ ...current, [lead.id]: status }));
+    void api.updateLeadStatus(lead.id, status).catch(() => undefined);
 
     const textByStatus: Record<LeadStatus, string> = {
       Bun: `Am notat că ${lead.name} pare bun. Voi căuta mai multe locuri asemănătoare.`,
@@ -383,260 +706,403 @@ function App() {
 
   function copySuggestedMessage() {
     if (!messageLead) return;
-    navigator.clipboard?.writeText(messageLead.contact);
+    navigator.clipboard?.writeText(messageDraft || messageLead.contact);
+  }
+
+  if (authChecking) {
+    return (
+      <main className="flex min-h-[100dvh] items-center justify-center bg-[#eef2e7]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#526b36]" />
+      </main>
+    );
+  }
+
+  if (screen === "auth") {
+    return <AuthScreen onLogin={handleLogin} onRegister={handleRegister} />;
+  }
+
+  if (screen === "producer-onboarding") {
+    return (
+      <ProducerOnboardingScreen
+        accountName={account?.name}
+        onBack={() => setScreen("auth")}
+        onComplete={handleProducerOnboarding}
+      />
+    );
   }
 
   return (
-    <main className="min-h-[100dvh] bg-[#eef2e7] p-0 text-foreground md:p-4">
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[1440px] overflow-hidden border-[#d9d0b8] bg-card shadow-warm md:min-h-[calc(100dvh-2rem)] md:rounded-[28px] md:border">
-        <aside
-          className={cn(
-            "min-h-[100dvh] w-full flex-col border-r border-[#ded5bf] bg-[#fbf7ed] md:flex md:min-h-0 md:w-[380px]",
-            mobileChatOpen ? "hidden" : "flex",
-          )}
-        >
-          <SidebarHeader />
-          <ScrollArea className="flex-1">
-            <div className="px-3 pb-4">
-              {conversations.map((conversation) => (
-                <button
-                  key={conversation.id}
-                  onClick={() => {
-                    setActiveConversation(conversation.id);
-                    setMobileChatOpen(true);
-                  }}
-                  className={cn(
-                    "group flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-[#f1eadb]",
-                    activeConversation === conversation.id && "bg-[#eaf0df]",
-                  )}
-                >
-                  <AgentAvatar small={conversation.id !== "warm"} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="truncate text-sm font-bold text-[#25311f]">{conversation.title}</p>
-                      <span className="text-xs text-muted-foreground">{conversation.time}</span>
-                    </div>
-                    <p className="truncate text-xs font-semibold text-[#6d735e]">{conversation.subtitle}</p>
-                    <p className="mt-1 truncate text-sm text-muted-foreground">{conversation.preview}</p>
-                  </div>
-                  {conversation.unread > 0 ? (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#e3a72f] px-1.5 text-xs font-bold text-[#24311f]">
-                      {conversation.unread}
-                    </span>
-                  ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 transition group-hover:opacity-100" />
-                  )}
-                </button>
-              ))}
-            </div>
-          </ScrollArea>
-          <ProducerSnapshot profile={profile} activeLeadCount={activeLeadCount} />
-        </aside>
+    <main className="h-[100dvh] overflow-hidden bg-[#eef2e7] p-2 pb-[86px] text-foreground md:p-4 md:pb-4">
+      <div className="mx-auto flex h-full w-full max-w-[1360px] flex-col overflow-hidden border border-[#d9d0b8] bg-card shadow-warm md:rounded-[24px]">
+        <DashboardHeader
+          profile={profile}
+          activeLeadCount={displayLeadCount}
+          activeView={dashboardView}
+          onViewChange={setDashboardView}
+        />
 
-        <section
-          className={cn(
-            "min-h-[100dvh] w-full flex-1 flex-col bg-[#f7f3e8] md:flex md:min-h-0",
-            mobileChatOpen ? "flex" : "hidden",
-          )}
-        >
-          <ChatHeader
-            onBack={() => setMobileChatOpen(false)}
+        {dashboardView === "profile" ? (
+          <ProfilePage
             profile={profile}
-            activeLeadCount={activeLeadCount}
+            activeLeadCount={displayLeadCount}
+            saving={profileSaving}
+            saved={profileSaved}
+            saveError={profileSaveError}
+            onSave={() => void saveProfile()}
+            onProductAdd={addProfileProduct}
+            onProductRemove={removeProfileProduct}
+            onProductUpdate={updateProfileProduct}
+            onProfileFieldChange={updateProfileField}
           />
-
-          <ScrollArea className="chat-pattern flex-1">
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-3 py-5 sm:px-5 lg:px-8">
-              <DatePill />
-              {messages.map((message) => (
-                <MessageBubble
-                  key={message.id}
-                  message={message}
-                  lead={message.kind === "lead" ? demoLeads.find((item) => item.id === message.leadId) : undefined}
-                  status={message.kind === "lead" ? leadStatuses[message.leadId] : undefined}
-                  onDetails={setSelectedLead}
-                  onMessage={setMessageLead}
-                  onStatus={updateLeadStatus}
-                />
-              ))}
-              {typing ? <TypingBubble /> : null}
-              <div ref={bottomRef} />
-            </div>
-          </ScrollArea>
-
-          <div className="border-t border-[#d7ccb3] bg-[#f8f4ea]/95 px-3 py-3 backdrop-blur sm:px-5">
-            {!onboardingDone && step ? (
-              <div className="mx-auto mb-2 flex max-w-4xl gap-2 overflow-x-auto pb-1 no-scrollbar">
-                {step.quickReplies.map((reply) => (
-                  <Button
-                    key={reply}
-                    type="button"
-                    size="sm"
-                    variant="chip"
-                    onClick={() => handleAnswer(reply)}
-                    disabled={typing}
-                    className="shrink-0"
-                  >
-                    {reply}
-                  </Button>
-                ))}
-              </div>
-            ) : (
-              <div className="mx-auto mb-2 flex max-w-4xl gap-2 overflow-x-auto pb-1 no-scrollbar">
-                {demoLeads.slice(0, 3).map((lead) => (
-                  <Button
-                    key={lead.id}
-                    type="button"
-                    size="sm"
-                    variant="chip"
-                    onClick={() => setMessageLead(lead)}
-                    className="shrink-0"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" />
-                    Scrie către {lead.name}
-                  </Button>
-                ))}
-              </div>
+        ) : (
+          <div
+            className={cn(
+              "grid min-h-0 flex-1 overflow-hidden bg-[#f7f3e8]",
+              dashboardView === "chat" ? "lg:grid-cols-[minmax(0,1fr)_420px]" : "grid-cols-1",
             )}
-
-            <form onSubmit={handleSubmit} className="mx-auto flex max-w-4xl items-center gap-2">
-              <Input
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                disabled={onboardingDone || typing}
-                placeholder={onboardingDone ? "Alege un lead sau marchează ce s-a întâmplat" : step?.placeholder}
-                className="bg-white/90"
+          >
+            <section
+              className={cn(
+                "min-h-0 flex-1 flex-col overflow-hidden border-b border-[#d7ccb3] lg:border-b-0 lg:border-r",
+                dashboardView === "chat" ? "flex lg:flex" : "hidden lg:hidden",
+              )}
+            >
+              <ChatHeader
+                profile={profile}
+                activeLeadCount={displayLeadCount}
               />
-              <Button type="submit" size="icon" variant="honey" disabled={!input.trim() || onboardingDone || typing}>
-                <Send className="h-4 w-4" />
-                <span className="sr-only">Trimite</span>
-              </Button>
-            </form>
+
+              <ScrollArea className="chat-pattern min-h-0 flex-1">
+                <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:px-5 lg:px-6">
+                  <DatePill />
+                  {messages.map((message) => (
+                    <MessageBubble
+                      key={message.id}
+                      message={message}
+                      lead={message.kind === "lead" ? leads.find((item) => item.id === message.leadId) : undefined}
+                      status={message.kind === "lead" ? leadStatuses[message.leadId] : undefined}
+                      failedFeedback={message.kind === "lead" ? failedFeedbacks[message.leadId] : undefined}
+                      onDetails={setSelectedLead}
+                      onMessage={openMessageLead}
+                      onStatus={updateLeadStatus}
+                      onWhatsAppClick={handleWhatsAppRedirect}
+                      onFailedClick={setFailedLeadDialog}
+                    />
+                  ))}
+                  {typing ? <TypingBubble /> : null}
+                  <div ref={bottomRef} />
+                </div>
+              </ScrollArea>
+
+              <div className="shrink-0 border-t border-[#d7ccb3] bg-[#f8f4ea]/95 px-3 py-3 backdrop-blur sm:px-5">
+                {!onboardingDone && step ? (
+                  <div className="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto pb-1 no-scrollbar">
+                    {step.quickReplies.map((reply) => (
+                      <Button
+                        key={reply}
+                        type="button"
+                        size="sm"
+                        variant="chip"
+                        onClick={() => handleAnswer(reply)}
+                        disabled={typing}
+                        className="shrink-0"
+                      >
+                        {reply}
+                      </Button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mx-auto mb-2 flex max-w-3xl gap-2 overflow-x-auto pb-1 no-scrollbar">
+                    {leads.slice(0, 3).map((lead) => (
+                      <Button
+                        key={lead.id}
+                        type="button"
+                        size="sm"
+                        variant="chip"
+                        onClick={() => openMessageLead(lead)}
+                        className="shrink-0"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        Scrie către {lead.name}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="mx-auto flex max-w-3xl items-center gap-2">
+                  <Input
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    disabled={onboardingDone || typing}
+                    placeholder={onboardingDone ? "Alege un lead sau marchează ce s-a întâmplat" : step?.placeholder}
+                    className="bg-white/90"
+                  />
+                  <Button type="submit" size="icon" variant="honey" disabled={!input.trim() || onboardingDone || typing}>
+                    <Send className="h-4 w-4" />
+                    <span className="sr-only">Trimite</span>
+                  </Button>
+                </form>
+              </div>
+            </section>
+
+            <div
+              key={dashboardView}
+              className={cn(
+                "min-h-0 overflow-hidden",
+                dashboardView === "map" ? "flex lg:flex flex-1" : "hidden lg:flex",
+              )}
+            >
+              <LeadMapPanel
+                leads={leads}
+                statuses={leadStatuses}
+                failedFeedbacks={failedFeedbacks}
+                activeLeadCount={displayLeadCount}
+                onDetails={setSelectedLead}
+                onMessage={openMessageLead}
+                onStatus={updateLeadStatus}
+                onWhatsAppClick={handleWhatsAppRedirect}
+                onFailedClick={setFailedLeadDialog}
+              />
+            </div>
           </div>
-        </section>
+        )}
       </div>
 
-      <LeadDetailsSheet lead={selectedLead} open={Boolean(selectedLead)} onOpenChange={(open) => !open && setSelectedLead(null)} />
+      <MobileBottomNav activeView={dashboardView} onViewChange={setDashboardView} />
+      <LeadDetailsDialog lead={selectedLead} open={Boolean(selectedLead)} onOpenChange={(open) => !open && setSelectedLead(null)} />
       <ContactMessageDialog
         lead={messageLead}
+        draft={messageDraft}
+        loading={messageDraftLoading}
         open={Boolean(messageLead)}
         onOpenChange={(open) => !open && setMessageLead(null)}
         onCopy={copySuggestedMessage}
+        onWhatsAppSend={() => handleWhatsAppRedirect(messageLead!)}
       />
+
+      <Dialog open={Boolean(failedLeadDialog)} onOpenChange={(open) => !open && setFailedLeadDialog(null)}>
+        <DialogContent className="max-w-md bg-[#fffdfa] border-[#d7ccb3]">
+          <DialogHeader>
+            <DialogTitle className="text-[#263421] font-extrabold text-xl">De ce nu a mers contactarea?</DialogTitle>
+            <DialogDescription className="text-[#62705a]">
+              AI-ul va stoca acest motiv pentru a exclude recomandările similare în viitor.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <p className="text-xs font-bold uppercase text-[#5a654f] tracking-wider">Sugestii rapide de feedback</p>
+            <div className="flex flex-col gap-2">
+              {[
+                "Vor brânză de capră, deși în meniu scrie 'brânză' (noi vindem doar de vacă)",
+                "Doresc livrare zilnică, iar noi livrăm doar vinerea",
+                "Prețul produselor noastre (34 lei/kg) este considerat prea mare",
+                "Au deja contract exclusiv stabil cu alt furnizor local"
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  className="text-left text-xs bg-[#f4ebd9] hover:bg-[#ebdcb9] text-[#423118] font-semibold p-2.5 rounded-xl border border-[#ded5bf] transition-colors"
+                  onClick={() => {
+                    if (failedLeadDialog) {
+                      handleFailedContactSubmit(failedLeadDialog.id, suggestion);
+                    }
+                  }}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+            
+            <div className="space-y-2 pt-3 border-t border-[#eadfca] flex flex-col">
+              <label className="text-xs font-bold uppercase text-[#5a654f] tracking-wider">Scrie un alt motiv custom</label>
+              <Input
+                value={customFailedReason}
+                onChange={(e) => setCustomFailedReason(e.target.value)}
+                placeholder="Ex: Au închis temporar sau meniul s-a schimbat..."
+                className="bg-white/80 border-[#ded5bf]"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" onClick={() => setFailedLeadDialog(null)}>
+              Anulează
+            </Button>
+            <Button
+              variant="honey"
+              disabled={!customFailedReason.trim()}
+              onClick={() => {
+                if (failedLeadDialog) {
+                  handleFailedContactSubmit(failedLeadDialog.id, customFailedReason);
+                }
+              }}
+            >
+              Salvează feedback AI
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
 
-function SidebarHeader() {
+
+function DashboardHeader({
+  profile,
+  activeLeadCount,
+  activeView,
+  onViewChange,
+}: {
+  profile: Profile;
+  activeLeadCount: number;
+  activeView: DashboardView;
+  onViewChange: (view: DashboardView) => void;
+}) {
+  const productSummary = summarizeProducts(profile.products);
+  const activeTitle: Record<DashboardView, string> = {
+    chat: "Chat",
+    map: "Hartă",
+    profile: "Profil",
+  };
+
   return (
-    <div className="border-b border-[#ded5bf] px-4 py-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xl font-extrabold text-[#263421]">Warm Leads</p>
-          <p className="text-sm text-muted-foreground">Lead-uri locale, pe înțelesul tău</p>
-        </div>
-        <Button size="icon" variant="outline" aria-label="Meniu">
-          <Menu className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="mt-4 grid grid-cols-5 gap-2">
-        {productIcons.map(({ label, icon: Icon, className }) => (
-          <div
-            key={label}
-            title={label}
-            className={cn("flex h-11 items-center justify-center rounded-2xl", className)}
-          >
-            <Icon className="h-5 w-5" />
+    <header className="shrink-0 border-b border-[#d7ccb3] bg-[#fbf7ed] px-3 py-2.5 sm:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <AgentAvatar small />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="truncate text-lg font-extrabold text-[#263421]">Warm Leads</p>
+              <Badge variant="olive" className="hidden sm:inline-flex">
+                {activeTitle[activeView]}
+              </Badge>
+            </div>
+            <p className="truncate text-xs text-muted-foreground sm:text-sm">
+              {productSummary.product || "Produse"} · {profile.location || "Dobrogea"} · {activeLeadCount} lead-uri
+            </p>
           </div>
-        ))}
+        </div>
+
+        <div className="hidden shrink-0 rounded-full border border-[#ded5bf] bg-[#fffaf0] p-1 md:flex">
+          <DashboardNavButton active={activeView === "chat"} icon={MessageCircle} label="Chat" onClick={() => onViewChange("chat")} />
+          <DashboardNavButton active={activeView === "map"} icon={MapPin} label="Hartă" onClick={() => onViewChange("map")} />
+          <DashboardNavButton active={activeView === "profile"} icon={UserRound} label="Profil" onClick={() => onViewChange("profile")} />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function DashboardNavButton({
+  active,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  icon: typeof MessageCircle;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition",
+        active ? "bg-[#4d6638] text-white shadow-sm" : "text-[#526047] hover:bg-[#f1eadb]",
+      )}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
+  );
+}
+
+function DashboardStat({ icon: Icon, label, value }: { icon: typeof Wheat; label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-[#ded5bf] bg-[#fffaf0] px-3 py-2">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#e9f0dc] text-[#4d6638]">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="text-[11px] font-bold uppercase text-muted-foreground">{label}</p>
+        <p className="truncate text-sm font-bold text-[#263421]">{value}</p>
       </div>
     </div>
   );
 }
 
-function ProducerSnapshot({ profile, activeLeadCount }: { profile: Profile; activeLeadCount: number }) {
-  const items = [
-    { icon: Wheat, label: profile.product || "produsul tău" },
-    { icon: PackageCheck, label: profile.quantity || "cantitate" },
-    { icon: MapPin, label: profile.location || "localitate" },
+function MobileBottomNav({
+  activeView,
+  onViewChange,
+}: {
+  activeView: DashboardView;
+  onViewChange: (view: DashboardView) => void;
+}) {
+  const items: Array<{ id: DashboardView; label: string; icon: typeof MessageCircle }> = [
+    { id: "chat", label: "Chat", icon: MessageCircle },
+    { id: "map", label: "Hartă", icon: MapPin },
+    { id: "profile", label: "Profil", icon: UserRound },
   ];
 
   return (
-    <div className="border-t border-[#ded5bf] p-4">
-      <Card className="border-[#d7ccb3] bg-[#fffaf0] shadow-none">
-        <CardHeader className="p-4 pb-2">
-          <div className="flex items-center justify-between gap-3">
-            <CardTitle className="text-sm">Profil rapid</CardTitle>
-            <Badge variant="warm">{activeLeadCount || demoLeads.length} lead-uri</Badge>
-          </div>
-          <CardDescription>Se completează din conversație.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 p-4 pt-0">
-          {items.map(({ icon: Icon, label }) => (
-            <div key={label} className="flex items-center gap-2 text-sm text-[#526047]">
-              <Icon className="h-4 w-4 text-[#6d823c]" />
-              <span className="truncate">{label}</span>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+    <nav className="fixed inset-x-3 bottom-3 z-40 rounded-[24px] border border-[#d7ccb3] bg-[#fffaf0]/95 p-2 shadow-warm backdrop-blur md:hidden">
+      <div className="grid grid-cols-3 gap-1">
+        {items.map(({ id, label, icon: Icon }) => {
+          const active = activeView === id;
+
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onViewChange(id)}
+              className={cn(
+                "flex h-14 flex-col items-center justify-center gap-1 rounded-[18px] text-xs font-extrabold transition",
+                active ? "bg-[#4d6638] text-white" : "text-[#526047] hover:bg-[#f1eadb]",
+              )}
+            >
+              <Icon className="h-5 w-5" />
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
+
 
 function ChatHeader({
   onBack,
   profile,
   activeLeadCount,
 }: {
-  onBack: () => void;
+  onBack?: () => void;
   profile: Profile;
   activeLeadCount: number;
 }) {
   return (
-    <header className="flex items-center justify-between gap-3 border-b border-[#d7ccb3] bg-[#f8f4ea] px-3 py-3 sm:px-5">
+    <header className="shrink-0 border-b border-[#d7ccb3] bg-[#f8f4ea] px-3 py-2.5 sm:px-5">
+      <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 lg:max-w-none">
       <div className="flex min-w-0 items-center gap-3">
-        <Button size="icon" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Înapoi">
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
+        {onBack ? (
+          <Button size="icon" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Înapoi">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+        ) : null}
         <AgentAvatar />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-base font-extrabold text-[#24311f]">Warm Leads</h1>
+            <h1 className="truncate text-base font-extrabold text-[#24311f]">Asistent de vânzări</h1>
             <Badge variant="olive" className="border-[#c8d9aa] bg-[#e8f0d7]">
               online
             </Badge>
           </div>
-          <p className="truncate text-sm text-muted-foreground">Îți găsește clienți locali și îți scrie mesajul.</p>
+          <p className="truncate text-sm text-muted-foreground">Recomandări locale și mesaje gata de trimis.</p>
         </div>
       </div>
 
-      <Sheet>
-        <SheetTrigger asChild>
-          <Button variant="outline" size="sm">
-            <Sparkles className="h-4 w-4" />
-            <span className="hidden sm:inline">Profil</span>
-          </Button>
-        </SheetTrigger>
-        <SheetContent>
-          <SheetHeader>
-            <SheetTitle>Profilul producătorului</SheetTitle>
-            <SheetDescription>Warm Leads îl folosește ca să explice recomandările simplu.</SheetDescription>
-          </SheetHeader>
-          <div className="mt-6 space-y-3">
-            <ProfileRow label="Ce vinzi" value={profile.product} icon={Wheat} />
-            <ProfileRow label="Disponibil" value={profile.quantity} icon={PackageCheck} />
-            <ProfileRow label="Localitate" value={profile.location} icon={MapPin} />
-            <ProfileRow label="Livrare" value={profile.range} icon={Truck} />
-            <ProfileRow label="Zile bune" value={profile.days} icon={CalendarDays} />
-          </div>
-          <div className="mt-6 rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
-            <p className="text-sm font-bold text-[#263421]">Recomandări active</p>
-            <p className="mt-1 text-3xl font-extrabold text-[#4b6134]">{activeLeadCount || demoLeads.length}</p>
-            <p className="mt-1 text-sm text-muted-foreground">Se ajustează când marchezi ce e bun și ce nu.</p>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <Badge variant="warm">{activeLeadCount} lead-uri</Badge>
+      </div>
     </header>
   );
 }
@@ -659,43 +1125,49 @@ function DatePill() {
   return (
     <div className="flex justify-center">
       <span className="rounded-full bg-white/70 px-3 py-1 text-xs font-bold text-[#6b715f] shadow-sm">
-        Azi, 5 iunie
+        Azi, 6 iunie
       </span>
     </div>
   );
 }
 
-function AgentAvatar({ small = false }: { small?: boolean }) {
-  return (
-    <Avatar className={cn("border border-[#d7ccb3] bg-[#eaf0df]", small ? "h-10 w-10" : "h-11 w-11")}>
-      <AvatarFallback className="bg-[#4d6638] text-[#fff7df]">
-        <Handshake className={cn(small ? "h-4 w-4" : "h-5 w-5")} />
-      </AvatarFallback>
-    </Avatar>
-  );
-}
 
 function MessageBubble({
   message,
   lead,
   status,
+  failedFeedback,
   onDetails,
   onMessage,
   onStatus,
+  onWhatsAppClick,
+  onFailedClick,
 }: {
   message: ChatMessage;
   lead?: Lead;
   status?: LeadStatus;
+  failedFeedback?: string;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
+  onWhatsAppClick: (lead: Lead) => void;
+  onFailedClick: (lead: Lead) => void;
 }) {
   if (message.kind === "lead" && lead) {
     return (
       <div className="flex items-end gap-2">
         <AgentAvatar small />
         <div className="max-w-[760px]">
-          <LeadCard lead={lead} status={status} onDetails={onDetails} onMessage={onMessage} onStatus={onStatus} />
+          <LeadCard
+            lead={lead}
+            status={status}
+            failedFeedback={failedFeedback}
+            onDetails={onDetails}
+            onMessage={onMessage}
+            onStatus={onStatus}
+            onWhatsAppClick={onWhatsAppClick}
+            onFailedClick={onFailedClick}
+          />
           <p className="mt-1 pl-2 text-xs text-muted-foreground">{message.time}</p>
         </div>
       </div>
@@ -732,20 +1204,29 @@ function MessageBubble({
 function LeadCard({
   lead,
   status,
+  failedFeedback,
   onDetails,
   onMessage,
   onStatus,
+  onWhatsAppClick,
+  onFailedClick,
 }: {
   lead: Lead;
   status?: LeadStatus;
+  failedFeedback?: string;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
+  onWhatsAppClick: (lead: Lead) => void;
+  onFailedClick: (lead: Lead) => void;
 }) {
   const Icon = leadIcon(lead.icon);
 
   return (
-    <Card className="max-w-[760px] overflow-hidden border-[#d7ccb3] bg-[#fffdf7]/95 shadow-bubble">
+    <Card className={cn(
+      "max-w-[760px] overflow-hidden border bg-[#fffdf7]/95 shadow-bubble transition-colors",
+      failedFeedback ? "border-[#ead2cc] bg-[#fffbf9]/95" : "border-[#d7ccb3]"
+    )}>
       <CardHeader className="p-4 pb-3">
         <div className="flex items-start gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#e9f0dc] text-[#4d6638]">
@@ -776,26 +1257,73 @@ function LeadCard({
           <p className="mt-1 text-sm text-[#5a654f]">{lead.reason}</p>
         </div>
 
+        {failedFeedback ? (
+          <div className="rounded-2xl border border-[#ead2cc] bg-[#fdf0ec] p-3 text-sm font-semibold text-[#884636] flex items-start gap-2">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-[#884636] mt-0.5" />
+            <div>
+              <p className="font-bold">Contact eșuat</p>
+              <p className="text-xs mt-0.5 text-[#9a5141] font-medium">{failedFeedback}</p>
+            </div>
+          </div>
+        ) : null}
+
         <p className="text-sm text-[#44533d]">
           <span className="font-bold">Ai putea să-i vinzi:</span> {lead.sell}
         </p>
 
+        <div className="grid gap-2 sm:grid-cols-2 text-xs border-t border-[#eadfca] pt-3">
+          {lead.phone && (
+            <div>
+              <span className="font-bold text-[#33412c]">📞 Contact:</span>{" "}
+              <span className="text-[#5a654f]">{lead.phone} ({lead.contactPerson || "Manager"})</span>
+            </div>
+          )}
+          {lead.supplyFrequency && (
+            <div>
+              <span className="font-bold text-[#33412c]">🚚 Livrare:</span>{" "}
+              <span className="text-[#5a654f]">{lead.supplyFrequency}</span>
+            </div>
+          )}
+          {lead.menuItems && (
+            <div className="sm:col-span-2">
+              <span className="font-bold text-[#33412c]">🍽️ În meniu:</span>{" "}
+              <span className="text-[#5a654f]">{lead.menuItems}</span>
+            </div>
+          )}
+          {lead.notes && (
+            <div className="sm:col-span-2 bg-[#fffbf2] border border-[#eadfca] rounded-xl p-2 mt-1">
+              <span className="font-bold text-[#33412c] block mb-0.5">ℹ️ AI Context:</span>
+              <span className="text-[#5a654f] italic">{lead.notes}</span>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Button variant="outline" size="sm" onClick={() => onDetails(lead)}>
             <BadgeCheck className="h-4 w-4" />
-            Vezi detalii
+            Detalii
           </Button>
           <Button variant="honey" size="sm" onClick={() => onMessage(lead)}>
             <MessageCircle className="h-4 w-4" />
             Scrie mesaj
           </Button>
-          <Button variant="outline" size="sm" onClick={() => onStatus(lead, "Nu e potrivit")}>
-            <ThumbsDown className="h-4 w-4" />
-            Nu e potrivit
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => onWhatsAppClick(lead)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-1.5"
+          >
+            <MessageCircle className="h-4 w-4" />
+            WhatsApp
           </Button>
-          <Button variant="default" size="sm" onClick={() => onStatus(lead, "Contactat")}>
-            <Check className="h-4 w-4" />
-            Am contactat
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onFailedClick(lead)}
+            className="text-rose-700 hover:bg-rose-50 border-rose-200 hover:border-rose-300"
+          >
+            Ceva n-a mers
           </Button>
         </div>
 
@@ -817,17 +1345,6 @@ function LeadCard({
   );
 }
 
-function StatusBadge({ status }: { status: LeadStatus }) {
-  const classNameByStatus: Record<LeadStatus, string> = {
-    Bun: "border-[#c8d9aa] bg-[#e8f0d7] text-[#3f532c]",
-    "Nu e potrivit": "border-[#ead2cc] bg-[#fae8e4] text-[#884636]",
-    Contactat: "border-[#d6c28b] bg-[#fff0bc] text-[#6f5114]",
-    "A răspuns": "border-[#c7dbe3] bg-[#e7f1f4] text-[#315765]",
-    "A cumpărat": "border-[#bcd5b6] bg-[#dbefd7] text-[#2f643b]",
-  };
-
-  return <Badge className={classNameByStatus[status]}>{status}</Badge>;
-}
 
 function TypingBubble() {
   return (
@@ -842,7 +1359,7 @@ function TypingBubble() {
   );
 }
 
-function LeadDetailsSheet({
+function LeadDetailsDialog({
   lead,
   open,
   onOpenChange,
@@ -855,17 +1372,17 @@ function LeadDetailsSheet({
   const Icon = leadIcon(lead.icon);
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="overflow-y-auto">
-        <SheetHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e9f0dc] text-[#4d6638]">
             <Icon className="h-6 w-6" />
           </div>
-          <SheetTitle>{lead.name}</SheetTitle>
-          <SheetDescription>
+          <DialogTitle>{lead.name}</DialogTitle>
+          <DialogDescription>
             {lead.type} · {lead.location}
-          </SheetDescription>
-        </SheetHeader>
+          </DialogDescription>
+        </DialogHeader>
 
         <Tabs defaultValue="short" className="mt-6">
           <TabsList className="w-full justify-start">
@@ -889,21 +1406,27 @@ function LeadDetailsSheet({
             </div>
           </TabsContent>
         </Tabs>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function ContactMessageDialog({
   lead,
+  draft,
+  loading,
   open,
   onOpenChange,
   onCopy,
+  onWhatsAppSend,
 }: {
   lead: Lead | null;
+  draft: string;
+  loading: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCopy: () => void;
+  onWhatsAppSend: () => void;
 }) {
   if (!lead) return null;
 
@@ -918,8 +1441,9 @@ function ContactMessageDialog({
           <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
             <MessageCircle className="h-4 w-4" />
             Mesaj sugerat
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           </div>
-          <p className="text-sm leading-relaxed text-[#2b3725]">{lead.contact}</p>
+          <p className="text-sm leading-relaxed text-[#2b3725]">{loading ? "Generez mesajul..." : draft}</p>
         </div>
         <div className="rounded-2xl bg-[#e9f0dc] p-3 text-sm text-[#405235]">
           Ton: {lead.tone}. Poți să-l trimiți așa sau să-l scurtezi cu detaliile tale.
@@ -929,9 +1453,16 @@ function ContactMessageDialog({
             <X className="h-4 w-4" />
             Închide
           </Button>
-          <Button variant="honey" onClick={onCopy}>
+          <Button variant="outline" onClick={onCopy} className="border-[#eadfca] text-[#2b3725] hover:bg-[#fff9eb]">
             <Clipboard className="h-4 w-4" />
             Copiază mesajul
+          </Button>
+          <Button
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-1.5"
+            onClick={onWhatsAppSend}
+          >
+            <MessageCircle className="h-4 w-4" />
+            Trimite pe WhatsApp
           </Button>
         </div>
       </DialogContent>

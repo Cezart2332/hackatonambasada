@@ -1,0 +1,75 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: warmleads
+      POSTGRES_PASSWORD: warmleads
+      POSTGRES_DB: warmleads
+    ports:
+      - "5433:5432"
+    volumes:
+      - warmleads_pg:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warmleads -d warmleads"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ai:
+    build:
+      context: ./ai-service
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./server
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgresql://warmleads:warmleads@db:5432/warmleads?schema=public
+      PORT: 3001
+      FRONTEND_URL: http://localhost:5173
+      BETTER_AUTH_URL: http://localhost:3001
+      BETTER_AUTH_SECRET: dev-docker-secret-change-me
+      AI_SERVICE_URL: http://ai:8000
+    depends_on:
+      db:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    environment:
+      # Browser calls /api on same origin; Vite proxies to backend over warmleads-net
+      VITE_PROXY_TARGET: http://backend:3001
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  warmleads_pg:
+
+networks:
+  default:
+    name: warmleads-net
+    driver: bridge

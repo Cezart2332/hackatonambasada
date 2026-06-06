@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String           @id @default(cuid())
+  name          String
+  email         String           @unique
+  emailVerified Boolean          @default(false)
+  image         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  producerProfile ProducerProfile?
+  leadStatuses  LeadStatusRecord[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verification")
+}
+
+enum LeadIcon {
+  restaurant
+  hotel
+  cafe
+  shop
+  deli
+}
+
+enum LeadStatus {
+  BUN
+  NU_E_POTRIVIT
+  CONTACTAT
+  A_RASPUNS
+  A_CUMPARAT
+}
+
+model ProducerProfile {
+  id            String            @id @default(cuid())
+  userId        String            @unique
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location      String            @default("")
+  locationChoice String?
+  latitude      Float?
+  longitude     Float?
+  rangeKm       Float             @default(35)
+  deliveryDays  String            @default("")
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  products      ProducerProduct[]
+
+  @@map("producer_profile")
+}
+
+model ProducerProduct {
+  id                String          @id @default(cuid())
+  profileId         String
+  profile           ProducerProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  name              String
+  estimatedQuantity String          @default("")
+  unit              String          @default("kg")
+  pricePerKg        String          @default("")
+  availableFrom     String          @default("Saptamana asta")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@map("producer_product")
+}
+
+model Lead {
+  id        String     @id
+  name      String
+  type      String
+  location  String
+  latitude  Float
+  longitude Float
+  baseMatch Int
+  reason    String
+  sell      String
+  bestDay   String
+  contact   String
+  tone      String
+  icon      LeadIcon
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  statuses  LeadStatusRecord[]
+
+  @@map("lead")
+}
+
+model LeadStatusRecord {
+  id        String     @id @default(cuid())
+  leadId    String
+  lead      Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    LeadStatus
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([leadId, userId])
+  @@map("lead_status_record")
+}

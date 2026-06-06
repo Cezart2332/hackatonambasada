@@ -128,6 +128,16 @@ async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 30_000)
   }
 }
 
+export function parseRangeValue(range: string): string {
+  const match = range.match(/(\d+)/);
+  return match ? match[1] : "";
+}
+
+export function formatRangeKm(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  return digits ? `${digits} km` : "";
+}
+
 export function parseRangeKm(range: string): number {
   const match = range.match(/(\d+)/);
   return match ? Number.parseInt(match[1], 10) : 35;

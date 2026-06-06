@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LocationSearch } from "@/components/LocationSearch";
 import { ProductEditorCard, createProduct, patchProducerProduct } from "@/components/ProductEditor";
-import { SectionLabel, FieldBlock, QuickChoiceRow } from "@/components/FormBlocks";
+import { SectionLabel, FieldBlock, QuickChoiceRow, RangeKmInput } from "@/components/FormBlocks";
 import { normalizeAvailableFrom } from "@/lib/availableFrom";
 import type { ProducerSetup, LocationChoice, ProducerProduct } from "@/lib/types";
 
@@ -246,14 +246,9 @@ export function ProducerOnboardingScreen({
                   />
                 </FieldBlock>
                 <FieldBlock label="Aria maximă de livrare">
-                  <Input
+                  <RangeKmInput
                     value={setup.range}
-                    onChange={(event) => updateSetup("range", event.target.value)}
-                    placeholder="Ex: 35 km"
-                  />
-                  <QuickChoiceRow
-                    choices={["20 km", "35 km", "60 km", "Pe tot litoralul"]}
-                    onChoose={(choice) => updateSetup("range", choice)}
+                    onChange={(value) => updateSetup("range", value)}
                   />
                 </FieldBlock>
               </div>

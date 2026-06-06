@@ -26,7 +26,7 @@ import { messageFromUnknownError } from "@/lib/errors";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { LocationSearch } from "@/components/LocationSearch";
 import { ProductEditorCard, createProduct, patchProducerProduct } from "@/components/ProductEditor";
-import { SectionLabel, FieldBlock } from "@/components/FormBlocks";
+import { SectionLabel, FieldBlock, RangeKmInput } from "@/components/FormBlocks";
 import type {
   AccountType,
   ProducerSetup,
@@ -101,7 +101,7 @@ export function AuthScreen({
     phone: "",
     products: [createProduct()],
     location: "",
-    range: "",
+    range: "35 km",
     days: "",
     extraDetails: "",
   });
@@ -210,7 +210,7 @@ export function AuthScreen({
           businessName: registerSetup.businessName.trim(),
           products: cleanProducts,
           location: registerSetup.location.trim(),
-          range: registerSetup.range.trim(),
+          range: registerSetup.range.trim() || "35 km",
           days: registerSetup.days.trim(),
           extraDetails: registerSetup.extraDetails?.trim() || "",
         };
@@ -562,10 +562,9 @@ export function AuthScreen({
                             </FieldBlock>
                             <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-1">
                               <FieldBlock label="Aria maximă de livrare">
-                                <Input
+                                <RangeKmInput
                                   value={registerSetup.range}
-                                  onChange={(event) => updateRegisterSetup("range", event.target.value)}
-                                  placeholder="Ex: 35 km"
+                                  onChange={(value) => updateRegisterSetup("range", value)}
                                 />
                               </FieldBlock>
                               <FieldBlock label="Zile bune de livrare">

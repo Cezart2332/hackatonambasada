@@ -144,6 +144,9 @@ export function messageFromUnknownError(error: unknown, fallback: string): strin
   }
 
   if (error instanceof Error) {
+    if (error.name === "AbortError" || error.name === "TimeoutError") {
+      return "Căutarea durează mai mult decât de obicei. Încearcă din nou peste câteva momente.";
+    }
     const mapped = mapKnownPhrase(error.message);
     if (mapped) return mapped;
     if (!isTechnicalMessage(error.message)) return error.message;

@@ -90,8 +90,8 @@ export function AuthScreen({
   const [registerAccountType, setRegisterAccountType] = useState<AccountType>("producer");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
-  const [loginEmail, setLoginEmail] = useState("ana@stupina-dobrogea.ro");
-  const [loginPassword, setLoginPassword] = useState("demo1234");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
   const [registerName, setRegisterName] = useState("");
   const [registerEmail, setRegisterEmail] = useState("");
   const [registerPassword, setRegisterPassword] = useState("");

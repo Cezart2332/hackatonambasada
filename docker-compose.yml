@@ -1,10 +1,8 @@
 services:
   db:
     image: pgvector/pgvector:pg16
-    environment:
-      POSTGRES_USER: warmleads
-      POSTGRES_PASSWORD: warmleads
-      POSTGRES_DB: warmleads
+    env_file:
+      - .env
     ports:
       - "5433:5432"
     volumes:
@@ -21,6 +19,11 @@ services:
       context: ./ai-service
     ports:
       - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -38,13 +41,8 @@ services:
       context: ./server
     ports:
       - "3001:3001"
-    environment:
-      DATABASE_URL: postgresql://warmleads:warmleads@db:5432/warmleads?schema=public
-      PORT: 3001
-      FRONTEND_URL: http://localhost:5173
-      BETTER_AUTH_URL: http://localhost:3001
-      BETTER_AUTH_SECRET: dev-docker-secret-change-me-32chars-min
-      AI_SERVICE_URL: http://ai:8000
+    env_file:
+      - .env
     healthcheck:
       test:
         [
@@ -69,9 +67,8 @@ services:
       dockerfile: Dockerfile.dev
     ports:
       - "5173:5173"
-    environment:
-      # Browser calls /api on same origin; Vite proxies to backend over warmleads-net
-      VITE_PROXY_TARGET: http://backend:3001
+    env_file:
+      - .env
     volumes:
       - ./:/app
       - /app/node_modules

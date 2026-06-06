@@ -9,8 +9,11 @@ import type {
   ProducerProduct,
   ProducerSetup,
   Profile,
+  SimulatedCampaignStep,
   VenueSetup,
 } from "./types";
+
+const LEAD_DISCOVERY_TIMEOUT_MS = 300_000;
 
 export type ApiProduct = {
   id: string;
@@ -88,7 +91,7 @@ export type AdminRegistration = {
   };
 };
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       ...init,
@@ -97,6 +100,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
         "Content-Type": "application/json",
         ...init?.headers,
       },
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (!response.ok) {
@@ -295,15 +299,39 @@ export const api = {
     }),
 
   matchLeads: () =>
-    apiFetch<{ leads: Lead[] }>("/api/leads/match", { method: "POST", body: "{}" }),
+    apiFetch<{ leads: Lead[] }>(
+      "/api/leads/match",
+      { method: "POST", body: "{}" },
+      LEAD_DISCOVERY_TIMEOUT_MS,
+    ),
+
+  matchMoreLeads: () =>
+    apiFetch<{ leads: Lead[] }>(
+      "/api/leads/match/more",
+      { method: "POST", body: "{}" },
+      LEAD_DISCOVERY_TIMEOUT_MS,
+    ),
 
   listLeads: () => apiFetch<{ leads: Array<Lead & { status?: LeadStatus | null }> }>("/api/leads"),
 
-  updateLeadStatus: (leadId: string, status: LeadStatus) =>
-    apiFetch<{ leadId: string; status: LeadStatus }>(`/api/leads/${leadId}/status`, {
-      method: "PUT",
-      body: JSON.stringify({ status }),
-    }),
+  updateLeadStatus: (leadId: string, status: LeadStatus, reason?: string) =>
+    apiFetch<{ leadId: string; status: LeadStatus; storedPreferences?: string }>(
+      `/api/leads/${leadId}/status`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ status, reason }),
+      },
+    ),
+
+  simulateCampaign: (payload?: { leadIds?: string[]; maxLeads?: number }) =>
+    apiFetch<{ steps: SimulatedCampaignStep[]; disclaimer: string }>(
+      "/api/leads/campaign/simulate",
+      {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      },
+      LEAD_DISCOVERY_TIMEOUT_MS,
+    ),
 
   listMatchedProducers: () =>
     apiFetch<{ producers: Array<Lead & { status?: LeadStatus | null }> }>(
@@ -331,8 +359,28 @@ export const api = {
     }));
   },
 
-  chatReply: (payload: { step: string; userAnswer: string; profileHint?: string }) =>
-    apiFetch<{ reply: string }>("/api/ai/v1/chat/reply", {
+  chatReply: (payload: {
+    userId: string;
+    message: string;
+    profile?: {
+      product?: string;
+      quantity?: string;
+      products?: string[];
+      location?: string;
+      latitude?: number | null;
+      longitude?: number | null;
+      rangeKm?: number;
+      range?: string;
+      days?: string;
+      deliveryDays?: string;
+    };
+  }) =>
+    apiFetch<{
+      reply: string;
+      profileUpdates?: Record<string, unknown>;
+      leads?: Lead[];
+      onboardingComplete?: boolean;
+    }>("/api/ai/v1/chat/reply", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -342,6 +390,10 @@ export const api = {
     productSummary?: string;
     locality?: string;
     tone?: string;
+    leadType?: string;
+    website?: string;
+    menuItems?: string;
+    notes?: string;
   }) =>
     apiFetch<{ message: string }>("/api/ai/v1/messages/draft", {
       method: "POST",
@@ -350,6 +402,10 @@ export const api = {
         productSummary: payload.productSummary ?? "",
         locality: payload.locality ?? "",
         tone: payload.tone ?? "cald, direct",
+        leadType: payload.leadType ?? "",
+        website: payload.website ?? "",
+        menuItems: payload.menuItems ?? "",
+        notes: payload.notes ?? "",
       }),
     }),
 

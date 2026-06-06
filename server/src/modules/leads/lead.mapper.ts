@@ -1,4 +1,5 @@
 import type { Lead, LeadIcon, LeadStatus, LeadStatusRecord } from "@prisma/client";
+import type { AiDiscoveredLead } from "./lead.ai.js";
 import type { MatchedLead } from "./lead.matcher.js";
 
 const statusToApi: Record<LeadStatus, string> = {
@@ -29,6 +30,37 @@ export function mapApiStatusToDb(status: string): LeadStatus {
     throw new Error(`Unknown status: ${status}`);
   }
   return mapped;
+}
+
+export function mapDiscoveredLeadToDto(lead: AiDiscoveredLead) {
+  const validIcons: LeadIcon[] = ["restaurant", "hotel", "cafe", "shop", "deli"];
+  const icon = validIcons.includes(lead.icon as LeadIcon)
+    ? (lead.icon as LeadIcon)
+    : "shop";
+
+  return {
+    id: lead.id,
+    name: lead.name,
+    type: lead.type,
+    location: lead.location,
+    distance: lead.distance,
+    match: lead.match,
+    reason: lead.reason,
+    sell: lead.sell,
+    bestDay: lead.bestDay,
+    contact: lead.contact,
+    tone: lead.tone,
+    icon,
+    coordinates: lead.coordinates,
+    needs: lead.needs ?? [],
+    matchedNeeds: lead.matchedNeeds ?? [],
+    website: lead.website ?? "",
+    phone: lead.phone ?? "",
+    contactPerson: lead.contactPerson ?? "",
+    menuItems: lead.menuItems ?? "",
+    notes: lead.notes ?? "",
+    sourceUrls: lead.sourceUrls ?? [],
+  };
 }
 
 export function mapLeadToDto(lead: MatchedLead) {

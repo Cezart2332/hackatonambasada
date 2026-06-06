@@ -466,12 +466,17 @@ def upsert_buyer(
 
 
 def list_interacted_buyer_ids(producer_user_id: str) -> set[str]:
+    """Return buyer IDs where the producer has taken a real action.
+    'shown' does NOT count — those leads can be shown again.
+    Only exclude: contacted, responded, bought, good, not_relevant.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT buyer_location_id FROM producer_buyer_interaction
                 WHERE producer_user_id = %s
+                  AND status IN ('contacted', 'responded', 'bought', 'good', 'not_relevant')
                 """,
                 (producer_user_id,),
             )
@@ -483,6 +488,7 @@ def record_interaction(
     producer_user_id: str,
     buyer_location_id: str,
     status: str = "shown",
+    reason: str = "",
 ) -> None:
     interaction_id = hashlib.sha256(
         f"{producer_user_id}:{buyer_location_id}".encode()
@@ -492,15 +498,38 @@ def record_interaction(
             cur.execute(
                 """
                 INSERT INTO producer_buyer_interaction (
-                    id, producer_user_id, buyer_location_id, status, updated_at
-                ) VALUES (%s, %s, %s, %s, NOW())
+                    id, producer_user_id, buyer_location_id, status, rejection_reason, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (producer_user_id, buyer_location_id) DO UPDATE SET
                     status = EXCLUDED.status,
+                    rejection_reason = CASE
+                        WHEN EXCLUDED.rejection_reason != '' THEN EXCLUDED.rejection_reason
+                        ELSE producer_buyer_interaction.rejection_reason
+                    END,
                     updated_at = NOW()
                 """,
-                (interaction_id, producer_user_id, buyer_location_id, status),
+                (interaction_id, producer_user_id, buyer_location_id, status, reason or ""),
             )
         conn.commit()
+
+
+def list_not_relevant_with_reasons(producer_user_id: str) -> list[dict]:
+    """Return not_relevant buyer interactions with their rejection reasons.
+    Used to determine if a previously-rejected lead can re-surface due to
+    changed producer products.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT i.buyer_location_id, i.rejection_reason, b.needs
+                FROM producer_buyer_interaction i
+                JOIN buyer_location b ON b.id = i.buyer_location_id
+                WHERE i.producer_user_id = %s AND i.status = 'not_relevant'
+                """,
+                (producer_user_id,),
+            )
+            return list(cur.fetchall())
 
 
 def search_buyers_by_vector(

@@ -85,22 +85,50 @@ def _profile_ready(profile: dict[str, Any]) -> bool:
 
 
 def _looks_like_discovery_request(message: str) -> bool:
-    lower = message.lower()
-    intent_terms = (
-        "caut",
-        "gaseste",
-        "găsește",
-        "vreau lead",
-        "lead-uri",
-        "leads",
-        "clienti",
-        "clienți",
-        "restaurante",
-        "localuri",
-        "cumparatori",
-        "cumpărători",
-    )
-    return any(term in lower for term in intent_terms)
+    lower = message.lower().strip()
+    
+    # Direct explicit expressions for finding leads/clients
+    explicit_phrases = {
+        "vreau lead", "vreau clienți", "vreau clienti", "noi lead-uri", "noi leads",
+        "lead-uri noi", "leads noi", "caută lead", "cauta lead", "caută clienți", "cauta clienti",
+        "caută clienti", "cauta clienți", "descoperă lead", "descopera lead", "descoperă clienți",
+        "descopera clienti"
+    }
+    if any(phrase in lower for phrase in explicit_phrases):
+        return True
+
+    # Search-related verbs
+    verbs = {
+        "caut", "caută", "cauta", "găsește", "găsești", "gaseste", "gasesti",
+        "arată", "arata", "identifică", "identifica", "descoperă", "descopera",
+        "să găsesc", "sa gasesc", "să caut", "sa caut"
+    }
+    
+    # Buyer/lead target terms
+    targets = {
+        "lead", "leads", "client", "clienți", "clienti", "restaurant", "restaurante",
+        "local", "localuri", "bistro", "bistrouri", "hotel", "hoteluri", "pensiune",
+        "pensiuni", "cafenea", "cafenele", "brutărie", "brutării", "brutarie", "brutarii",
+        "patiserie", "patiserii", "băcănie", "băcănii", "bacanie", "bacanii", "magazin",
+        "magazine", "supermarket", "supermarketuri", "cumpărător", "cumpărători",
+        "cumparator", "cumparatori", "achizitor", "achizitori", "producător", "producători"
+    }
+
+    has_verb = any(v in lower for v in verbs)
+    has_target = any(t in lower for t in targets)
+
+    if has_verb and has_target:
+        # Ignore administrative/help requests that might mention a target word
+        ignore_patterns = {
+            "cum să", "cum sa", "ajutor", "parolă", "parola", "cont", "profil",
+            "setări", "setari", "cum modific", "cum schimb", "cum șterg", "cum sterg"
+        }
+        if any(pat in lower for pat in ignore_patterns):
+            return False
+        return True
+
+    return False
+
 
 
 def _looks_like_more_discovery(message: str) -> bool:
@@ -204,10 +232,28 @@ def _run_discovery_from_context(discover_more: bool = False) -> str:
         ctx.leads = leads
         ctx.onboarding_complete = True
 
+        if not leads and discover_more:
+            # No new leads found with discover_more — try a force refresh to find genuinely new ones
+            logger.info("discover_more returned 0 leads, retrying with force_refresh")
+            result = discover_leads(
+                user_id=ctx.user_id,
+                products=products,
+                locality=locality,
+                latitude=latitude,
+                longitude=longitude,
+                range_km=range_km,
+                limit=3,
+                force_refresh=True,
+                discover_more=False,
+            )
+            leads = result.get("leads") or []
+            ctx.leads = leads
+
         if not leads:
             return (
-                "Nu am găsit lead-uri noi în raza ta acum. "
-                "Sugerează mărirea razei sau reîncercarea mai târziu."
+                f"Am verificat toată zona din raza de {int(range_km)} km în jurul {locality}. "
+                "Nu am găsit afaceri noi nepotrivite deja. "
+                "Poți mări raza de livrare sau aștept să apară venue-uri noi în zona ta."
             )
         names = ", ".join(lead["name"] for lead in leads[:5])
         suffix = f" (+{len(leads) - 5} altele)" if len(leads) > 5 else ""

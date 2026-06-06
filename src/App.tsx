@@ -1147,7 +1147,35 @@ function App() {
     }
 
     const dto = await api.getProfile();
-    const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
+    let restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
+
+    // Auto-geocode: if profile has a location string but no coordinates, fetch them silently
+    if (restoredProfile.location && !restoredProfile.locationChoice) {
+      try {
+        const geoResults = await api.geoSearch(restoredProfile.location + ", Romania");
+        if (geoResults.length > 0) {
+          const top = geoResults[0];
+          restoredProfile = {
+            ...restoredProfile,
+            locationChoice: {
+              label: top.display_name,
+              lat: top.lat,
+              lon: top.lon,
+            },
+          };
+          // Persist the geocoded coordinates back to the server
+          void api.updateProfile({
+            ...setupToApiPayload(restoredProfile),
+            latitude: Number.parseFloat(top.lat),
+            longitude: Number.parseFloat(top.lon),
+            locationChoice: top.display_name,
+          }).catch(() => undefined);
+        }
+      } catch {
+        // geo lookup optional — silent fail
+      }
+    }
+
     initProducerChat(restoredProfile, user.name);
 
     void api
@@ -1336,8 +1364,30 @@ function App() {
     applyProfileProducts((profile.products || []).filter((product) => product.id !== productId));
   }
 
-  function updateProfileField(key: "location" | "range" | "days", value: string) {
+  function updateProfileField(key: "businessName" | "phone" | "location" | "range" | "days", value: string) {
     setProfile((current) => ({ ...current, [key]: value }));
+
+    // Auto-geocode when location text changes and no coordinates exist yet
+    if (key === "location" && value.trim().length > 3) {
+      void (async () => {
+        try {
+          const results = await api.geoSearch(value.trim() + ", Romania");
+          if (results.length > 0) {
+            const top = results[0];
+            setProfile((current) => ({
+              ...current,
+              locationChoice: {
+                label: top.display_name,
+                lat: top.lat,
+                lon: top.lon,
+              },
+            }));
+          }
+        } catch {
+          // geo lookup optional — silent fail
+        }
+      })();
+    }
   }
 
   function updateVenueProfileField(

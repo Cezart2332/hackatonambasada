@@ -138,7 +138,12 @@ def discover_leads(
         target_count=max(limit * 2, limit + 2),
     )
 
-    exclude = db.list_interacted_buyer_ids(user_id)
+    exclude_base = db.list_interacted_buyer_ids(user_id)
+
+    # Smart re-surface: if a not_relevant lead's needs now overlap with current
+    # producer products, lift the exclusion so it can reappear
+    exclude = _apply_smart_resurface(user_id, exclude_base, producer_needs)
+
     producer_query = f"Producător local din {locality}. Vinde: {needs_to_text(producer_needs)}."
 
     rows: list[dict[str, Any]] = []
@@ -220,12 +225,13 @@ def update_buyer_status(user_id: str, buyer_id: str, status: str, reason: str | 
         "Contactat": "contacted",
         "A răspuns": "responded",
         "A cumpărat": "bought",
+        "Ceva n-a mers": "not_relevant",
     }
     db_status = status_map.get(status, "shown")
-    db.record_interaction(user_id, buyer_id, db_status)
+    db.record_interaction(user_id, buyer_id, db_status, reason=reason or "")
 
     stored_labels: list[str] = []
-    if status == "Nu e potrivit" and reason:
+    if db_status == "not_relevant" and reason:
         from app.services.preferences import process_rejection
 
         buyer = db.get_buyer_by_id(buyer_id)
@@ -241,3 +247,43 @@ def update_buyer_status(user_id: str, buyer_id: str, status: str, reason: str | 
     if stored_labels:
         result["storedPreferences"] = ", ".join(stored_labels)
     return result
+
+
+def _apply_smart_resurface(
+    user_id: str,
+    exclude_ids: set[str],
+    current_producer_needs: list[str],
+) -> set[str]:
+    """Remove from the exclusion set any 'not_relevant' leads whose needs
+    now overlap with the producer's current products.
+    This lets a restaurant that needed goat cheese resurface if the producer
+    starts selling goat cheese, even if they were rejected before for a
+    different incompatibility.
+    """
+    if not exclude_ids or not current_producer_needs:
+        return exclude_ids
+
+    try:
+        not_relevant = db.list_not_relevant_with_reasons(user_id)
+    except Exception as exc:
+        logger.warning("smart_resurface: could not load not_relevant list: %s", exc)
+        return exclude_ids
+
+    resurfaced: set[str] = set()
+    for row in not_relevant:
+        buyer_id = row["buyer_location_id"]
+        if buyer_id not in exclude_ids:
+            continue
+        buyer_needs: list[str] = list(row.get("needs") or [])
+        if not buyer_needs:
+            continue
+        # If buyer's needs now overlap with producer's current products, resurface
+        if overlap_score(buyer_needs, current_producer_needs) > 0:
+            reason = (row.get("rejection_reason") or "").lower()
+            # Only resurface if rejection wasn't about non-product factors
+            non_product_signals = ["pret", "livrare", "zile", "exclusiv", "contract", "departe", "km"]
+            if not any(sig in reason for sig in non_product_signals):
+                resurfaced.add(buyer_id)
+                logger.info("Smart resurface: %s (current needs now match producer products)", buyer_id)
+
+    return exclude_ids - resurfaced

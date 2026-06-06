@@ -39,6 +39,10 @@ _STREET_PREFIXES = re.compile(
     r"^(strada|str\.|bulevardul|bd\.|b-dul|blvd|aleea|șoseaua|soseaua|piața|piata)\b",
     re.IGNORECASE,
 )
+# Matches parenthetical notes the LLM inserts, e.g. "(la parterul Hotelului X)"
+_PARENTHETICAL = re.compile(r"\([^)]*\)")
+# Matches "Sat X, comuna Y" administrative prefix
+_SAT_COMUNA = re.compile(r"\bsat\b[^,]*,?\s*\bcomuna\b[^,]*,?", re.IGNORECASE)
 _BROAD_LOCALITIES = {"dobrogea", "dobrogea plateau", "regiunea dobrogea"}
 
 
@@ -96,7 +100,11 @@ def _expand_street_abbreviations(address: str) -> str:
 
 def _address_variants(address: str) -> list[str]:
     variants: list[str] = []
-    cleaned = _expand_street_abbreviations(address)
+    # Fix missing space between word and digit: "Revoluției1" → "Revoluției 1"
+    normalized = re.sub(r"([a-zA-ZÀ-žа-яА-Я])(\d)", r"\1 \2", address)
+    # Normalize "nr. 4C" → "4C" for cleaner Nominatim queries
+    normalized = re.sub(r"\bnr\.?\s*", "", normalized, flags=re.IGNORECASE).strip(", ")
+    cleaned = _expand_street_abbreviations(normalized)
     if cleaned:
         variants.append(cleaned)
 
@@ -148,10 +156,14 @@ def infer_city_from_address(address: str) -> str:
 
 
 def _normalize_address(address: str, locality: str) -> str:
-    """Strip redundant city/country tails the LLM often duplicates."""
+    """Strip redundant city/country tails the LLM often duplicates,
+    and remove parenthetical notes / administrative prefixes."""
     text = (address or "").strip()
     if not text:
         return ""
+
+    # Remove parenthetical annotations like "(la parterul Hotelului X)"
+    text = _PARENTHETICAL.sub("", text).strip()
 
     text = _COUNTRY_SUFFIXES.sub("", text).strip(" ,")
     text = _POSTCODE.sub("", text).strip(" ,")
@@ -186,8 +198,22 @@ def _build_geocode_queries(name: str, address: str, locality: str) -> list[str]:
             if name:
                 queries.append(f"{name}, {variant}{address_locality_suffix}, Romania")
             queries.append(f"{variant}{address_locality_suffix}, Romania")
+
+        # Extra variant: strip "Sat X, comuna Y" prefix and try just the street
+        sat_stripped = _SAT_COMUNA.sub("", clean_address).strip(" ,")
+        if sat_stripped and sat_stripped != clean_address and len(sat_stripped) > 5:
+            for variant in _address_variants(sat_stripped):
+                if name:
+                    queries.append(f"{name}, {variant}{address_locality_suffix}, Romania")
+                queries.append(f"{variant}{address_locality_suffix}, Romania")
+
     if name:
         queries.append(f"{name}{name_locality_suffix}, Romania")
+
+    # Last-resort: just name + city (no street at all)
+    if name and locality:
+        queries.append(f"{name}, {locality}, Romania")
+
     return list(dict.fromkeys(query for query in queries if query.strip(" ,")))
 
 
@@ -251,21 +277,21 @@ def _matches_requested_locality(item: dict, locality: str | None) -> bool:
         return True
 
     address = item.get("address") if isinstance(item.get("address"), dict) else {}
+    # Extended list: include hamlet, neighbourhood, quarter for rural/resort localities
     locality_fields = [
-        "city",
-        "town",
-        "village",
-        "municipality",
-        "hamlet",
-        "suburb",
+        "city", "town", "village", "municipality",
+        "hamlet", "suburb", "neighbourhood", "quarter",
+        "city_district", "county",
     ]
     values = [_fold(str(address.get(field) or "")) for field in locality_fields]
     values = [value for value in values if value]
 
     if values:
-        return target in values
+        # Exact match OR target is substring of a value (handles "Vadu" inside longer strings)
+        if any(target == v or target in v or v in target for v in values):
+            return True
 
-    # Some POIs omit city/town fields but still include the city in display_name.
+    # Fallback: check display_name
     display = _fold(str(item.get("display_name") or ""))
     return bool(display and re.search(rf"\b{re.escape(target)}\b", display))
 

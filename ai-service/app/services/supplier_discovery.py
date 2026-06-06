@@ -91,13 +91,22 @@ def ensure_suppliers_researched(
     if venue_user_id:
         exclude_names = [row["name"] for row in db_suppliers.list_venue_suppliers(venue_user_id)]
 
+    existing_suppliers = db_suppliers.list_suppliers_in_area(area_key)
+    has_any_data = len(existing_suppliers) > 0
+
+    # Use cached data if any suppliers exist AND TTL is still valid
     cache_eligible = (
         not force_refresh
+        and has_any_data
         and db_suppliers.is_supplier_area_fresh(area_key)
-        and db_suppliers.supplier_area_has_data(area_key)
     )
     if cache_eligible:
-        logger.info("Supplier cache hit for %s", area_key)
+        logger.info("Supplier cache hit for %s (%d suppliers)", area_key, len(existing_suppliers))
+        return area_key
+
+    # If area has data but TTL expired, still reuse it (weekly TTL handles auto-refresh)
+    if has_any_data and not force_refresh:
+        logger.info("Supplier area %s: TTL expired but has %d suppliers — reusing cache", area_key, len(existing_suppliers))
         return area_key
 
     if not settings.llm_enabled:

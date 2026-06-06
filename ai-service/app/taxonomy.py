@@ -75,6 +75,49 @@ DISPLAY_RO: dict[str, str] = {
     "herbs": "ierburi",
 }
 
+PLANT_NEEDS = {"vegetables", "fruit", "herbs"}
+MEAT_RETAIL_TERMS = {
+    "carmangerie",
+    "carmangeria",
+    "măcelărie",
+    "macelarie",
+    "măcelar",
+    "macelar",
+    "butcher",
+    "carne",
+    "mezel",
+    "mezeluri",
+    "cârnați",
+    "carnati",
+    "afumături",
+    "afumaturi",
+}
+VEGAN_VEGETARIAN_TERMS = {
+    "vegan",
+    "vegetarian",
+    "raw vegan",
+    "plant based",
+    "plant-based",
+}
+PRODUCE_RETAIL_TERMS = {
+    "legume",
+    "fructe",
+    "zarzavat",
+    "apro zar",
+    "aprozar",
+    "green",
+    "bio shop",
+}
+CHEESE_DAIRY_TERMS = {
+    "brânză",
+    "branza",
+    "brânzeturi",
+    "lactate",
+    "dairy",
+    "delicatese",
+    "deli",
+}
+
 
 def normalize_need(text: str) -> str | None:
     lower = text.lower().strip()
@@ -118,3 +161,44 @@ def overlap_score(buyer_needs: list[str], producer_needs: list[str]) -> float:
     producer_set = set(producer_needs)
     overlap = len(buyer_set & producer_set)
     return overlap / len(producer_set)
+
+
+def deterministic_business_compatibility(
+    *,
+    name: str,
+    business_type: str,
+    producer_needs: list[str],
+    buyer_needs: list[str] | None = None,
+    summary: str = "",
+    menu_items: str = "",
+    notes: str = "",
+) -> bool:
+    """Fallback compatibility filter used only when the AI judge is unavailable."""
+    producer_set = set(producer_needs or [])
+    if not producer_set:
+        return True
+
+    buyer_set = set(buyer_needs or [])
+    combined = f"{name} {business_type} {summary} {menu_items} {notes}".lower()
+
+    if buyer_set and not overlap_score(list(buyer_set), list(producer_set)):
+        return False
+
+    if "meat" in producer_set or "poultry" in producer_set:
+        if any(term in combined for term in VEGAN_VEGETARIAN_TERMS):
+            return False
+        if buyer_set and buyer_set <= PLANT_NEEDS:
+            return False
+
+    if "cheese" in producer_set or "dairy" in producer_set:
+        if any(term in combined for term in MEAT_RETAIL_TERMS) and not any(
+            term in combined for term in CHEESE_DAIRY_TERMS
+        ):
+            return False
+        if any(term in combined for term in PRODUCE_RETAIL_TERMS) and buyer_set <= PLANT_NEEDS:
+            return False
+
+    if producer_set <= PLANT_NEEDS and any(term in combined for term in MEAT_RETAIL_TERMS):
+        return False
+
+    return True

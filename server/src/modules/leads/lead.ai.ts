@@ -89,6 +89,7 @@ export async function listDiscoveredLeads(
   userId: string,
   latitude: number,
   longitude: number,
+  products: string[] = [],
 ): Promise<AiDiscoveredLead[] | null> {
   const data = await aiPost<{ leads: AiDiscoveredLead[] }>(
     "/v1/leads/list",
@@ -96,6 +97,7 @@ export async function listDiscoveredLeads(
       userId,
       latitude,
       longitude,
+      products,
     },
     15_000,
   );

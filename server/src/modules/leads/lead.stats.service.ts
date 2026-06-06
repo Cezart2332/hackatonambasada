@@ -10,18 +10,22 @@ const DEFAULT_LON = 28.6348;
 const geocodedLocalityCache = new Map<string, { latitude: number; longitude: number }>();
 
 async function getStatsOrigin(userId: string) {
-  const profile = await prisma.producerProfile.findUnique({ where: { userId } });
-  if (!profile) return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+  const profile = await prisma.producerProfile.findUnique({
+    where: { userId },
+    include: { products: true },
+  });
+  if (!profile) return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON, products: [] as string[] };
+  const products = profile.products.map((product) => product.name).filter(Boolean);
   if (profile.latitude != null && profile.longitude != null) {
-    return { latitude: profile.latitude, longitude: profile.longitude };
+    return { latitude: profile.latitude, longitude: profile.longitude, products };
   }
 
   const locality = (profile.locationChoice || profile.location || "").trim();
-  if (!locality) return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+  if (!locality) return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON, products };
 
   const cacheKey = locality.toLowerCase();
   const cached = geocodedLocalityCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) return { ...cached, products };
 
   try {
     const [first] = await searchLocations(`${locality}, Dobrogea, România`);
@@ -38,13 +42,13 @@ async function getStatsOrigin(userId: string) {
           },
         })
         .catch(() => undefined);
-      return coords;
+      return { ...coords, products };
     }
   } catch {
-    return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+    return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON, products };
   }
 
-  return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+  return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON, products };
 }
 
 export async function getLeadStatsForUser(userId: string, accountType?: string) {
@@ -58,7 +62,7 @@ export async function getLeadStatsForUser(userId: string, accountType?: string) 
   }
 
   const origin = await getStatsOrigin(userId);
-  const listed = await listDiscoveredLeads(userId, origin.latitude, origin.longitude);
+  const listed = await listDiscoveredLeads(userId, origin.latitude, origin.longitude, origin.products);
   const leads = listed ?? [];
 
   const pipeline: Record<string, number> = {

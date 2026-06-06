@@ -19,6 +19,7 @@ const baseProducer = (overrides: Partial<ProducerCandidate> = {}): ProducerCandi
   rangeKm: 60,
   deliveryDays: "Marți",
   products: [{ id: "1", name: "Miere polifloră", profileId: "x", unit: "borcan", estimatedQuantity: "10", pricePerKg: "28", availableFrom: "", createdAt: new Date(), updatedAt: new Date() } as never],
+  verified: false,
   ...overrides,
 });
 
@@ -87,8 +88,27 @@ describe("producer-for-venue.matcher", () => {
       scope: "matched",
     });
     expect(result[0]?.matchedNeeds).toContain("miere");
-    expect(result[0]?.verified).toBe(true);
+    expect(result[0]?.verified).toBe(false);
     expect(result[0]?.matchFactors.inRange).toBe(true);
+  });
+
+  it("passes curated verified flag from producer profile", () => {
+    const verified = matchProducersForVenue({
+      producers: [baseProducer({ verified: true })],
+      venueLatitude: 44.17,
+      venueLongitude: 28.63,
+      productsNeeded: "miere",
+      scope: "matched",
+    });
+    const unverified = matchProducersForVenue({
+      producers: [baseProducer({ verified: false })],
+      venueLatitude: 44.17,
+      venueLongitude: 28.63,
+      productsNeeded: "miere",
+      scope: "matched",
+    });
+    expect(verified[0]?.verified).toBe(true);
+    expect(unverified[0]?.verified).toBe(false);
   });
 
   it("collectMatchedNeeds splits comma-separated needs", () => {

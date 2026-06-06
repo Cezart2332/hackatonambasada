@@ -16,13 +16,13 @@ import {
   ChevronDown,
   UserRound,
   Phone,
-  Package,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { MatchWhySection } from "@/components/MatchWhySection";
+import { ProducerOfferList } from "@/components/ProducerOfferList";
 import type { Lead, LeadStatus } from "@/lib/types";
 
 const feedbackOptions: LeadStatus[] = ["Bun", "Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
@@ -199,11 +199,15 @@ export function MapLeadRow({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1">
                 <p className="truncate text-sm font-extrabold text-[#263421]">{lead.name}</p>
-                {lead.verified ? <Badge variant="olive" className="shrink-0 text-[10px]">Verificat</Badge> : null}
+                {lead.verified ? <Badge variant="olive" className="shrink-0 text-xs">Verificat</Badge> : null}
                 {isVenue && lead.matchFactors ? (
-                  <Badge variant={lead.matchFactors.inRange ? "olive" : "outline"} className="shrink-0 text-[10px]">
-                    {lead.matchFactors.inRange ? "În raza ta" : "În afara razei"}
-                  </Badge>
+                  lead.matchFactors.inRange ? (
+                    <Badge variant="olive" className="shrink-0 text-xs">În raza ta</Badge>
+                  ) : (
+                    <span className="inline-flex shrink-0 items-center rounded-full border border-[#e8b4b4] bg-[#fdeaea] px-2 py-0.5 text-xs font-bold text-[#b42318]">
+                      În afara razei
+                    </span>
+                  )
                 ) : null}
                 {!isVenue && lead.match >= 85 ? <Badge variant="warm" className="shrink-0 text-[10px]">Top</Badge> : null}
               </div>
@@ -243,15 +247,13 @@ export function MapLeadRow({
             </div>
           ) : null}
 
-          <div className="mt-2 rounded-lg border border-[#e0d8c4] bg-[#f8f4ea] px-2.5 py-2">
-            <p className="mb-1 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-[#5a7040]">
-              <Package className="h-4 w-4 shrink-0" strokeWidth={2.25} />
-              {isVenue ? "Oferă" : "Ai putea să-i vinzi"}
-            </p>
-            <p className="text-sm font-semibold leading-relaxed text-[#263421] sm:text-[15px]">
+          {isVenue ? (
+            <ProducerOfferList sell={lead.sell} compact />
+          ) : (
+            <p className="mt-2 text-sm font-semibold leading-relaxed text-[#263421] sm:text-[15px]">
               {lead.sell}
             </p>
-          </div>
+          )}
 
           {!expanded && (status || failedFeedback) ? (
             <div className="mt-1.5 flex flex-wrap items-center gap-1">

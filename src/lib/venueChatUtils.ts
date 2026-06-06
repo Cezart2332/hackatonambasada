@@ -86,13 +86,6 @@ export function isVenueReadyForMatching(
   );
 }
 
-export function venueSessionStep(session: VenueChatSession): 0 | 1 | 2 | 3 {
-  if (!session.needs.trim()) return 0;
-  if (!session.supplyFrequency.trim()) return 1;
-  if (!session.preferredDays.trim()) return 2;
-  return 3;
-}
-
 function normalizeNeedText(value: string) {
   return value
     .toLowerCase()

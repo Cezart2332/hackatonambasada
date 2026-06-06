@@ -53,6 +53,7 @@ async function fetchApprovedProducerCandidates() {
       rangeKm: entry.producerProfile!.rangeKm,
       deliveryDays: entry.producerProfile!.deliveryDays,
       products: entry.producerProfile!.products,
+      verified: entry.producerProfile!.verified,
     }));
 }
 

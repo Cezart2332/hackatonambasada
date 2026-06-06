@@ -12,6 +12,7 @@ export type ProducerCandidate = {
   rangeKm: number;
   deliveryDays: string;
   products: ProducerProduct[];
+  verified: boolean;
 };
 
 export type MatchFactors = {
@@ -258,7 +259,7 @@ export function matchProducersForVenue(params: {
           inRange,
           proximityBonus,
         },
-        verified: true,
+        verified: producer.verified,
       };
     })
     .filter((producer): producer is MatchedProducer => producer !== null)

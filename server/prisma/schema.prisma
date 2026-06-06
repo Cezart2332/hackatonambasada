@@ -118,6 +118,7 @@ model ProducerProfile {
   deliveryDays   String            @default("")
   extraDetails       String            @default("")
   approvalStatus     ApprovalStatus    @default(PENDING)
+  verified           Boolean           @default(false)
   subscriptionTier   SubscriptionTier  @default(FREE)
   proActivatedAt     DateTime?
   createdAt          DateTime          @default(now())

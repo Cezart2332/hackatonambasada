@@ -16,6 +16,7 @@ export type AdminRegistrationDto = {
     rangeKm: number;
     deliveryDays: string;
     extraDetails: string;
+    verified: boolean;
     products: Array<{
       name: string;
       estimatedQuantity: string;
@@ -55,6 +56,7 @@ export function mapProducerRegistration(
       rangeKm: profile.rangeKm,
       deliveryDays: profile.deliveryDays,
       extraDetails: profile.extraDetails,
+      verified: profile.verified,
       products: profile.products.map((product) => ({
         name: product.name,
         estimatedQuantity: product.estimatedQuantity,

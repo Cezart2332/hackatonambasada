@@ -1,6 +1,6 @@
 import { prisma } from "../../shared/prisma.js";
 import { AppError } from "../../shared/errors/AppError.js";
-import type { ReviewRegistrationInput } from "./admin.schema.js";
+import type { ReviewRegistrationInput, UpdateProducerVerifiedInput } from "./admin.schema.js";
 import {
   mapProducerRegistration,
   mapVenueRegistration,
@@ -67,7 +67,10 @@ export async function reviewRegistration(userId: string, input: ReviewRegistrati
   if (user.accountType === "PRODUCER" && user.producerProfile) {
     await prisma.producerProfile.update({
       where: { id: user.producerProfile.id },
-      data: { approvalStatus: nextStatus },
+      data: {
+        approvalStatus: nextStatus,
+        ...(nextStatus === "REJECTED" ? { verified: false } : {}),
+      },
     });
     return { userId, status: input.status };
   }
@@ -134,4 +137,26 @@ export async function listActiveAccounts(type?: string): Promise<AdminRegistrati
 
 export async function updateAccountStatus(userId: string, input: ReviewRegistrationInput) {
   return reviewRegistration(userId, input);
+}
+
+export async function updateProducerVerified(userId: string, input: UpdateProducerVerifiedInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: { producerProfile: true },
+  });
+
+  if (!user?.producerProfile || user.accountType !== "PRODUCER") {
+    throw new AppError("Producătorul nu a fost găsit.", 404, "NOT_FOUND");
+  }
+
+  if (user.producerProfile.approvalStatus !== "APPROVED") {
+    throw new AppError("Doar producătorii aprobați pot fi marcați ca verificați.", 400, "INVALID_STATE");
+  }
+
+  await prisma.producerProfile.update({
+    where: { id: user.producerProfile.id },
+    data: { verified: input.verified },
+  });
+
+  return { userId, verified: input.verified };
 }

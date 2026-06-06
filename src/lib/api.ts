@@ -39,6 +39,7 @@ export type ApiProfile = {
   deliveryDays: string;
   extraDetails: string;
   approvalStatus: "pending" | "approved" | "rejected";
+  verified: boolean;
   products: ApiProduct[];
 };
 
@@ -75,6 +76,7 @@ export type AdminRegistration = {
     rangeKm: number;
     deliveryDays: string;
     extraDetails: string;
+    verified: boolean;
     products: Array<{
       name: string;
       estimatedQuantity: string;
@@ -477,5 +479,11 @@ export const api = {
         body: JSON.stringify({ status }),
       },
     ),
+
+  updateProducerVerified: (userId: string, verified: boolean) =>
+    apiFetch<{ userId: string; verified: boolean }>(`/api/admin/producers/${userId}/verified`, {
+      method: "PUT",
+      body: JSON.stringify({ verified }),
+    }),
 
 };

@@ -11,6 +11,7 @@ import {
   Phone,
   RefreshCw,
   Search,
+  ShieldCheck,
   ShieldOff,
   Store,
   Users,
@@ -202,13 +203,16 @@ function RegistrationCard({
 function ActiveAccountCard({
   registration,
   onSuspend,
+  onToggleVerified,
   busy,
 }: {
   registration: AdminRegistration;
   onSuspend: (userId: string) => Promise<void>;
+  onToggleVerified: (userId: string, verified: boolean) => Promise<void>;
   busy: string | null;
 }) {
   const isProducer = registration.accountType === "producer";
+  const isVerified = Boolean(registration.producer?.verified);
 
   return (
     <Card className="border-[#c8d9aa] bg-[#fffdf7] shadow-sm">
@@ -228,6 +232,12 @@ function ActiveAccountCard({
                 </Badge>
               )}
               <Badge className="border-[#bcd5b6] bg-[#dbefd7] text-[#2f643b]">Live în platformă</Badge>
+              {isProducer && isVerified ? (
+                <Badge variant="olive">
+                  <ShieldCheck className="mr-1 h-3 w-3" />
+                  Verificat
+                </Badge>
+              ) : null}
             </div>
             <CardTitle className="text-xl text-[#263421]">
               {registration.businessName || registration.contactName}
@@ -237,20 +247,37 @@ function ActiveAccountCard({
               {new Date(registration.updatedAt).toLocaleString("ro-RO")}
             </CardDescription>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy === registration.userId}
-            className="border-[#e8b4a8] text-[#884636] hover:bg-[#fdf0ec]"
-            onClick={() => void onSuspend(registration.userId)}
-          >
-            {busy === registration.userId ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <ShieldOff className="h-4 w-4" />
-            )}
-            Suspendă acces
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {isProducer ? (
+              <Button
+                size="sm"
+                variant={isVerified ? "outline" : "honey"}
+                disabled={busy === registration.userId}
+                onClick={() => void onToggleVerified(registration.userId, !isVerified)}
+              >
+                {busy === registration.userId ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+                {isVerified ? "Retrage verificare" : "Marchează verificat"}
+              </Button>
+            ) : null}
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy === registration.userId}
+              className="border-[#e8b4a8] text-[#884636] hover:bg-[#fdf0ec]"
+              onClick={() => void onSuspend(registration.userId)}
+            >
+              {busy === registration.userId ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ShieldOff className="h-4 w-4" />
+              )}
+              Suspendă acces
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
@@ -419,6 +446,19 @@ export function AdminDashboardPage() {
     }
   }
 
+  async function toggleProducerVerified(userId: string, verified: boolean) {
+    setBusyId(userId);
+    setError(null);
+    try {
+      await api.updateProducerVerified(userId, verified);
+      await reloadAll();
+    } catch (caught) {
+      setError(messageFromUnknownError(caught, "Nu am putut actualiza statusul de verificare."));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function logout() {
     await authClient.signOut();
     setAuthorized(false);
@@ -572,6 +612,7 @@ export function AdminDashboardPage() {
                     key={registration.userId}
                     registration={registration}
                     onSuspend={suspendAccount}
+                    onToggleVerified={toggleProducerVerified}
                     busy={busyId}
                   />
                 ))}

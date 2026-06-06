@@ -60,6 +60,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VenueChatProgress } from "@/components/VenueChatProgress";
 import { MatchWhySection } from "@/components/MatchWhySection";
+import { ProducerOfferList } from "@/components/ProducerOfferList";
 import { useVenueChatSession } from "@/hooks/useVenueChatSession";
 import { cn } from "@/lib/utils";
 import {
@@ -314,6 +315,7 @@ function App() {
   const activeOnboardingSteps = getOnboardingSteps(isVenue);
   const onboardingDone = currentStep >= activeOnboardingSteps.length;
   const activeStepIndex = findNextStepIndex(profile, 0, isVenue);
+
   const step = onboardingDone
     ? undefined
     : activeOnboardingSteps[activeStepIndex] ?? activeOnboardingSteps[currentStep];
@@ -1501,6 +1503,9 @@ function App() {
             <VenueProfilePage
               profile={profile}
               activeMatchCount={displayLeadCount}
+              sessionNeeds={venueSessionNeeds}
+              sessionFrequency={venueSessionSupplyFrequency}
+              sessionPreferredDays={venueSessionPreferredDays}
               saving={profileSaving}
               saved={profileSaved}
               saveError={profileSaveError}
@@ -1536,11 +1541,9 @@ function App() {
                 dashboardView === "chat" ? "flex" : "hidden",
               )}
             >
-              <ChatHeader
-                profile={profile}
-                activeLeadCount={displayLeadCount}
-                isVenue={isVenue}
-              />
+              {!isVenue ? (
+                <ChatHeader profile={profile} activeLeadCount={displayLeadCount} />
+              ) : null}
 
               <ScrollArea className="chat-pattern min-h-0 flex-1">
                 <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:px-5 lg:px-6">
@@ -1590,7 +1593,7 @@ function App() {
                 ) : (
                   <>
                     {isVenue && dashboardView === "chat" ? (
-                      <VenueChatProgress session={venueChat.session} />
+                      <VenueChatProgress />
                     ) : null}
                   <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2 pb-1">
                     {!isVenue ? (
@@ -1808,6 +1811,36 @@ function App() {
 }
 
 
+function venueDashboardTitle(activeView: DashboardView, profile: Profile) {
+  if (activeView === "director") return "Director producători";
+  if (activeView === "profile") return "Profil local";
+  return profile.businessName?.trim() || "Localul tău";
+}
+
+function venueDashboardIcon(activeView: DashboardView, venueType?: Profile["venueType"]) {
+  if (activeView === "director") return LayoutGrid;
+  if (activeView === "profile") return UserRound;
+  const icons = {
+    restaurant: Utensils,
+    hotel: Building2,
+    cafe: Coffee,
+    shop: Store,
+    deli: Wine,
+  } as const;
+  return icons[venueType ?? "restaurant"] ?? Store;
+}
+
+function venueDashboardSubtitle(activeView: DashboardView, profile: Profile, activeLeadCount: number) {
+  const location = profile.location?.trim() || "Dobrogea";
+  if (activeView === "director") {
+    return `${activeLeadCount} producători · ${location}`;
+  }
+  if (activeView === "profile") {
+    return [profile.businessName, location].filter(Boolean).join(" · ");
+  }
+  return `${location} · spune în chat ce produse cauți`;
+}
+
 function DashboardHeader({
   profile,
   activeLeadCount,
@@ -1824,31 +1857,24 @@ function DashboardHeader({
   venueSessionNeeds?: string;
 }) {
   const productSummary = summarizeProducts(profile.products);
-  const activeTitle: Record<DashboardView, string> = {
-    chat: "Chat",
-    director: "Director",
-    profile: "Profil",
-  };
+  const title = isVenue
+    ? venueDashboardTitle(activeView, profile)
+    : "Warm Leads";
+  const subtitle = isVenue
+    ? venueDashboardSubtitle(activeView, profile, activeLeadCount)
+    : `${productSummary.product || "Produse"} · ${profile.location || "Dobrogea"} · ${activeLeadCount} lead-uri`;
+  const HeaderIcon = isVenue ? venueDashboardIcon(activeView, profile.venueType) : Wheat;
 
   return (
     <header className="shrink-0 border-b border-[#d7ccb3] bg-[#fbf7ed] px-3 py-2.5 sm:px-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
-          <AgentAvatar small />
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#e9f0dc] text-[#4d6638]">
+            <HeaderIcon className="h-5 w-5" />
+          </span>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-lg font-extrabold text-[#263421]">
-                {isVenue ? "Producători locali" : "Warm Leads"}
-              </p>
-              <Badge variant="olive" className="hidden sm:inline-flex">
-                {activeTitle[activeView]}
-              </Badge>
-            </div>
-            <p className="truncate text-xs text-muted-foreground sm:text-sm">
-              {(isVenue ? venueSessionNeeds || "Spune în Chat" : productSummary.product) || "Produse"} ·{" "}
-              {profile.location || "Dobrogea"} ·{" "}
-              {activeLeadCount} {isVenue ? "producători" : "lead-uri"}
-            </p>
+            <p className="truncate text-lg font-extrabold text-[#263421]">{title}</p>
+            <p className="truncate text-xs text-muted-foreground sm:text-sm">{subtitle}</p>
           </div>
         </div>
 
@@ -1946,43 +1972,30 @@ function ChatHeader({
   onBack,
   profile,
   activeLeadCount,
-  isVenue = false,
 }: {
   onBack?: () => void;
   profile: Profile;
   activeLeadCount: number;
-  isVenue?: boolean;
 }) {
   return (
     <header className="shrink-0 border-b border-[#d7ccb3] bg-[#f8f4ea] px-3 py-2.5 sm:px-5">
       <div className="mx-auto flex max-w-3xl items-center justify-between gap-3 lg:max-w-none">
-      <div className="flex min-w-0 items-center gap-3">
-        {onBack ? (
-          <Button size="icon" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Înapoi">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-        ) : null}
-        <AgentAvatar />
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-base font-extrabold text-[#24311f]">
-              {isVenue ? "Asistent de aprovizionare" : "Asistent de vânzări"}
-            </h1>
-            <Badge variant="olive" className="border-[#c8d9aa] bg-[#e8f0d7]">
-              online
-            </Badge>
+        <div className="flex min-w-0 items-center gap-3">
+          {onBack ? (
+            <Button size="icon" variant="ghost" className="md:hidden" onClick={onBack} aria-label="Înapoi">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          ) : null}
+          <AgentAvatar />
+          <div className="min-w-0">
+            <h1 className="truncate text-base font-extrabold text-[#24311f]">Asistent de vânzări</h1>
+            <p className="truncate text-sm text-muted-foreground">
+              {profile.location || "Dobrogea"} · recomandări și contact lead-uri
+            </p>
           </div>
-          <p className="truncate text-sm text-muted-foreground">
-            {isVenue
-              ? "Producători locali și mesaje gata de trimis."
-              : "Recomandări locale și mesaje gata de trimis."}
-          </p>
         </div>
-      </div>
 
-      <Badge variant="warm">
-        {activeLeadCount} {isVenue ? "producători" : "lead-uri"}
-      </Badge>
+        <Badge variant="warm">{activeLeadCount} lead-uri</Badge>
       </div>
     </header>
   );
@@ -2166,9 +2179,13 @@ function LeadCard({
           </div>
         ) : null}
 
-        <p className="text-sm text-[#44533d]">
-          <span className="font-bold">{isVenue ? "Oferă:" : "Ai putea să-i vinzi:"}</span> {lead.sell}
-        </p>
+        {isVenue ? (
+          <ProducerOfferList sell={lead.sell} />
+        ) : (
+          <p className="text-sm text-[#44533d]">
+            <span className="font-bold">Ai putea să-i vinzi:</span> {lead.sell}
+          </p>
+        )}
 
         {isVenue ? <MatchWhySection lead={lead} isVenue /> : null}
 

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { FieldBlock } from "@/components/FormBlocks";
+import { FieldBlock, RangeKmInput } from "@/components/FormBlocks";
 import { InventoryLineEditor } from "@/components/ProductEditor";
 import { LogoutSection } from "@/components/LogoutSection";
 import { PlanSection } from "@/components/PlanSection";
@@ -170,10 +170,9 @@ export function ProfilePage({
                 </FieldBlock>
                 <div className="grid grid-cols-2 gap-3">
                   <FieldBlock label="Arie maximă">
-                    <Input
+                    <RangeKmInput
                       value={profile.range || ""}
-                      onChange={(event) => onProfileFieldChange("range", event.target.value)}
-                      placeholder="Ex: 35 km"
+                      onChange={(value) => onProfileFieldChange("range", value)}
                     />
                   </FieldBlock>
                   <FieldBlock label="Zile bune">

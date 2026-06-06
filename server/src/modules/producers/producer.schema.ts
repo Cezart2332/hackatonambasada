@@ -9,12 +9,15 @@ export const productSchema = z.object({
 });
 
 export const updateProfileSchema = z.object({
+  businessName: z.string().optional(),
+  phone: z.string().optional(),
   location: z.string().optional(),
   locationChoice: z.string().optional().nullable(),
   latitude: z.number().optional().nullable(),
   longitude: z.number().optional().nullable(),
   rangeKm: z.number().positive().optional(),
   deliveryDays: z.string().optional(),
+  extraDetails: z.string().optional(),
   products: z.array(productSchema).optional(),
 });
 

@@ -1,9 +1,18 @@
+export type AccountType = "producer" | "venue" | "admin";
+
+export type ApprovalStatus = "pending" | "approved" | "rejected";
+
+export type VenueType = "restaurant" | "hotel" | "cafe" | "shop" | "deli";
+
 export type ProfileKey = "product" | "quantity" | "location" | "range" | "days";
 
 export type ProducerProduct = {
   id: string;
   name: string;
+  category: string;
   estimatedQuantity: string;
+  baseUnit: string;
+  packaging: string;
   unit: string;
   pricePerKg: string;
   availableFrom: string;
@@ -19,6 +28,8 @@ export type Profile = Partial<Record<ProfileKey, string>> & {
   producerName?: string;
   businessName?: string;
   phone?: string;
+  extraDetails?: string;
+  venueType?: VenueType;
   products?: ProducerProduct[];
   locationChoice?: LocationChoice;
 };
@@ -26,6 +37,19 @@ export type Profile = Partial<Record<ProfileKey, string>> & {
 export type ProducerAccount = {
   name: string;
   email: string;
+  accountType: AccountType;
+};
+
+export type VenueSetup = {
+  contactName: string;
+  businessName: string;
+  venueType: VenueType;
+  phone: string;
+  location: string;
+  locationChoice?: LocationChoice;
+  productsNeeded: string;
+  supplyFrequency: string;
+  preferredDays: string;
 };
 
 export type ProducerSetup = {
@@ -37,6 +61,7 @@ export type ProducerSetup = {
   locationChoice?: LocationChoice;
   range: string;
   days: string;
+  extraDetails?: string;
 };
 
 export type LeadStatus =
@@ -88,7 +113,7 @@ export type ChatMessage =
       time: string;
     };
 
-export type AppScreen = "auth" | "producer-onboarding" | "chat";
+export type AppScreen = "auth" | "producer-onboarding" | "pending-approval" | "chat";
 export type DashboardView = "chat" | "map" | "profile";
 
 export type SimulatedCampaignStep = {

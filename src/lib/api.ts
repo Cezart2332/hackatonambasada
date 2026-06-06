@@ -1,6 +1,17 @@
 import { API_BASE } from "./config";
 import { ApiError, messageFromApiResponse, messageFromUnknownError } from "./errors";
-import type { Lead, LeadStatus, ProducerProduct, ProducerSetup, Profile, SimulatedCampaignStep } from "./types";
+import { formatAvailableFromDisplay } from "./availableFrom";
+import { getPackagingLabel, getPriceUnitShort, normalizeLegacyProduct } from "./productCatalog";
+import type {
+  AccountType,
+  Lead,
+  LeadStatus,
+  ProducerProduct,
+  ProducerSetup,
+  Profile,
+  SimulatedCampaignStep,
+  VenueSetup,
+} from "./types";
 
 const LEAD_DISCOVERY_TIMEOUT_MS = 300_000;
 
@@ -15,13 +26,69 @@ export type ApiProduct = {
 
 export type ApiProfile = {
   id: string;
+  businessName: string;
+  phone: string;
   location: string;
   locationChoice: string | null;
   latitude: number | null;
   longitude: number | null;
   rangeKm: number;
   deliveryDays: string;
+  extraDetails: string;
+  approvalStatus: "pending" | "approved" | "rejected";
   products: ApiProduct[];
+};
+
+export type ApiVenueProfile = {
+  id: string;
+  businessName: string;
+  venueType: string;
+  phone: string;
+  location: string;
+  locationChoice: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  productsNeeded: string;
+  supplyFrequency: string;
+  preferredDays: string;
+  approvalStatus: "pending" | "approved" | "rejected";
+};
+
+export type ApiAccount = {
+  accountType: AccountType;
+  approvalStatus: "pending" | "approved" | "rejected" | null;
+};
+
+export type AdminRegistration = {
+  userId: string;
+  accountType: "producer" | "venue";
+  approvalStatus: "pending" | "approved" | "rejected";
+  contactName: string;
+  email: string;
+  phone: string;
+  businessName: string;
+  location: string;
+  locationChoice: string | null;
+  registeredAt: string;
+  updatedAt: string;
+  producer?: {
+    rangeKm: number;
+    deliveryDays: string;
+    extraDetails: string;
+    products: Array<{
+      name: string;
+      estimatedQuantity: string;
+      unit: string;
+      pricePerKg: string;
+      availableFrom: string;
+    }>;
+  };
+  venue?: {
+    venueType: string;
+    productsNeeded: string;
+    supplyFrequency: string;
+    preferredDays: string;
+  };
 };
 
 async function apiFetch<T>(path: string, init?: RequestInit, timeoutMs = 30_000): Promise<T> {
@@ -71,12 +138,15 @@ export function setupToApiPayload(setup: ProducerSetup | Profile) {
     "locationChoice" in setup && setup.locationChoice ? setup.locationChoice : undefined;
 
   return {
+    businessName: ("businessName" in setup && setup.businessName) || "",
+    phone: ("phone" in setup && setup.phone) || "",
     location: setup.location ?? "",
     locationChoice: locationChoice?.label ?? null,
     latitude: locationChoice?.lat ? Number.parseFloat(locationChoice.lat) : null,
     longitude: locationChoice?.lon ? Number.parseFloat(locationChoice.lon) : null,
     rangeKm: parseRangeKm(("range" in setup && setup.range) || "35 km"),
     deliveryDays: setup.days ?? "",
+    extraDetails: ("extraDetails" in setup && setup.extraDetails) || "",
     products: (setup.products ?? []).map((product) => ({
       name: product.name,
       estimatedQuantity: product.estimatedQuantity,
@@ -108,12 +178,58 @@ export function summarizeProducts(products: ProducerProduct[] = []) {
         const quantity = product.estimatedQuantity.trim()
           ? `${product.estimatedQuantity.trim()} ${product.unit.trim() || "kg"}`
           : "cantitate de confirmat";
+        const priceUnit = getPriceUnitShort(product.baseUnit || "kg");
+        const packaging = product.packaging
+          ? getPackagingLabel(product.category || "legume_fructe", product.packaging)
+          : product.unit.trim() || "ambalaj de confirmat";
         const price = product.pricePerKg.trim()
-          ? `${product.pricePerKg.trim()} lei/kg`
+          ? `${product.pricePerKg.trim()} lei/${priceUnit}`
           : "preț de confirmat";
-        return `${product.name.trim()} (${quantity}, ${price}, disponibil: ${product.availableFrom.trim() || "curând"})`;
+        const available = formatAvailableFromDisplay(product.availableFrom) || "curând";
+        return `${product.name.trim()} (${quantity}, ${price} în ${packaging}, disponibil: ${available})`;
       })
       .join("; "),
+  };
+}
+
+export function setupVenueToApiPayload(setup: VenueSetup) {
+  const locationChoice = setup.locationChoice;
+
+  return {
+    businessName: setup.businessName,
+    venueType: setup.venueType,
+    phone: setup.phone,
+    location: setup.location,
+    locationChoice: locationChoice?.label ?? null,
+    latitude: locationChoice?.lat ? Number.parseFloat(locationChoice.lat) : null,
+    longitude: locationChoice?.lon ? Number.parseFloat(locationChoice.lon) : null,
+    productsNeeded: setup.productsNeeded,
+    supplyFrequency: setup.supplyFrequency,
+    preferredDays: setup.preferredDays,
+  };
+}
+
+export function apiVenueProfileToFrontend(
+  dto: ApiVenueProfile,
+  extras?: { contactName?: string },
+): Profile {
+  return {
+    producerName: extras?.contactName,
+    businessName: dto.businessName,
+    phone: dto.phone,
+    venueType: dto.venueType as Profile["venueType"],
+    product: dto.productsNeeded,
+    location: dto.location,
+    locationChoice:
+      dto.latitude != null && dto.longitude != null
+        ? {
+            label: dto.locationChoice ?? dto.location,
+            lat: String(dto.latitude),
+            lon: String(dto.longitude),
+          }
+        : undefined,
+    days: dto.preferredDays,
+    quantity: dto.supplyFrequency,
   };
 }
 
@@ -121,21 +237,30 @@ export function apiProfileToFrontend(
   dto: ApiProfile,
   extras?: { producerName?: string; businessName?: string; phone?: string },
 ): Profile {
-  const products: ProducerProduct[] = dto.products.map((p) => ({
-    id: p.id,
-    name: p.name,
-    estimatedQuantity: p.estimatedQuantity,
-    unit: p.unit,
-    pricePerKg: p.pricePerKg,
-    availableFrom: p.availableFrom,
-  }));
+  const products: ProducerProduct[] = dto.products.map((p) => {
+    const legacy = normalizeLegacyProduct({
+      name: p.name,
+      unit: p.unit,
+    });
+    return {
+      id: p.id,
+      name: p.name,
+      category: legacy.category,
+      estimatedQuantity: p.estimatedQuantity,
+      baseUnit: legacy.baseUnit,
+      packaging: legacy.packaging,
+      unit: legacy.unit,
+      pricePerKg: p.pricePerKg,
+      availableFrom: p.availableFrom,
+    };
+  });
 
   const summary = summarizeProducts(products);
 
   return {
     producerName: extras?.producerName,
-    businessName: extras?.businessName,
-    phone: extras?.phone,
+    businessName: dto.businessName || extras?.businessName,
+    phone: dto.phone || extras?.phone,
     products,
     product: summary.product,
     quantity: summary.quantity,
@@ -150,14 +275,25 @@ export function apiProfileToFrontend(
         : undefined,
     range: `${Math.round(dto.rangeKm)} km`,
     days: dto.deliveryDays,
+    extraDetails: dto.extraDetails,
   };
 }
 
 export const api = {
+  getAccount: () => apiFetch<ApiAccount>("/api/account/me"),
+
   getProfile: () => apiFetch<ApiProfile>("/api/producers/me"),
 
   updateProfile: (payload: ReturnType<typeof setupToApiPayload>) =>
     apiFetch<ApiProfile>("/api/producers/me", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  getVenueProfile: () => apiFetch<ApiVenueProfile>("/api/venues/me"),
+
+  updateVenueProfile: (payload: ReturnType<typeof setupVenueToApiPayload>) =>
+    apiFetch<ApiVenueProfile>("/api/venues/me", {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
@@ -193,6 +329,21 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify(payload ?? {}),
+      },
+      LEAD_DISCOVERY_TIMEOUT_MS,
+    ),
+
+  listMatchedProducers: () =>
+    apiFetch<{ producers: Array<Lead & { status?: LeadStatus | null }> }>(
+      "/api/venues/me/matched-producers",
+    ),
+
+  updateProducerMatchStatus: (producerUserId: string, status: LeadStatus) =>
+    apiFetch<{ producerUserId: string; status: LeadStatus }>(
+      `/api/venues/me/matched-producers/${producerUserId}/status`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ status }),
       },
     ),
 
@@ -257,6 +408,35 @@ export const api = {
         notes: payload.notes ?? "",
       }),
     }),
+
+  listAdminRegistrations: (status?: "pending" | "approved" | "rejected") => {
+    const query = status ? `?status=${status}` : "";
+    return apiFetch<{ registrations: AdminRegistration[] }>(`/api/admin/registrations${query}`);
+  },
+
+  reviewRegistration: (userId: string, status: "approved" | "rejected") =>
+    apiFetch<{ userId: string; status: "approved" | "rejected" }>(
+      `/api/admin/registrations/${userId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ status }),
+      },
+    ),
+
+  listAdminActiveAccounts: (type?: "producer" | "venue" | "all") => {
+    const query =
+      type && type !== "all" ? `?type=${type}` : type === "all" ? "" : "";
+    return apiFetch<{ accounts: AdminRegistration[] }>(`/api/admin/active-accounts${query}`);
+  },
+
+  updateAdminActiveAccount: (userId: string, status: "approved" | "rejected") =>
+    apiFetch<{ userId: string; status: "approved" | "rejected" }>(
+      `/api/admin/active-accounts/${userId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ status }),
+      },
+    ),
 
   enrichLead: (payload: { leadName: string; leadType?: string; productSummary?: string }) =>
     apiFetch<{

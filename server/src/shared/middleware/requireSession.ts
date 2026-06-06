@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { fromNodeHeaders } from "better-auth/node";
 import { auth } from "../auth.js";
 import { AppError } from "../errors/AppError.js";
+import { prisma } from "../prisma.js";
 
 export async function requireSession(
   req: Request,
@@ -17,10 +18,9 @@ export async function requireSession(
     return;
   }
 
-  req.user = {
-    ...session.user,
-    image: session.user.image ?? null,
-  };
+  req.user = await prisma.user.findUniqueOrThrow({
+    where: { id: session.user.id },
+  });
   req.session = session.session;
   next();
 }

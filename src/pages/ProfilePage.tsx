@@ -35,11 +35,13 @@ function ProfileProducts({
   onAdd,
   onRemove,
   onUpdate,
+  onPatch,
 }: {
   products: ProducerProduct[];
   onAdd: () => void;
   onRemove: (productId: string) => void;
   onUpdate: (productId: string, key: keyof ProducerProduct, value: string) => void;
+  onPatch: (productId: string, patch: Partial<ProducerProduct>) => void;
 }) {
   return (
     <div className="mt-4 rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
@@ -63,6 +65,7 @@ function ProfileProducts({
             canRemove={products.length > 1}
             onRemove={onRemove}
             onUpdate={onUpdate}
+            onPatch={onPatch}
           />
         ))}
       </div>
@@ -80,6 +83,7 @@ export function ProfilePage({
   onProductAdd,
   onProductRemove,
   onProductUpdate,
+  onProductPatch,
   onProfileFieldChange,
 }: {
   profile: Profile;
@@ -91,6 +95,7 @@ export function ProfilePage({
   onProductAdd: () => void;
   onProductRemove: (productId: string) => void;
   onProductUpdate: (productId: string, key: keyof ProducerProduct, value: string) => void;
+  onProductPatch: (productId: string, patch: Partial<ProducerProduct>) => void;
   onProfileFieldChange: (key: "location" | "range" | "days", value: string) => void;
 }) {
   return (
@@ -165,6 +170,7 @@ export function ProfilePage({
               onAdd={onProductAdd}
               onRemove={onProductRemove}
               onUpdate={onProductUpdate}
+              onPatch={onProductPatch}
             />
           </div>
         </div>

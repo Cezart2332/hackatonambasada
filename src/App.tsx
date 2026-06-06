@@ -57,9 +57,18 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
-import { api, apiProfileToFrontend, setupToApiPayload, summarizeProducts } from "@/lib/api";
+import {
+  api,
+  apiProfileToFrontend,
+  apiVenueProfileToFrontend,
+  setupToApiPayload,
+  setupVenueToApiPayload,
+  summarizeProducts,
+} from "@/lib/api";
 import { messageFromAuthError, messageFromUnknownError } from "@/lib/errors";
 import type {
+  AccountType,
+  ApprovalStatus,
   AppScreen,
   ChatMessage,
   DashboardView,
@@ -71,15 +80,18 @@ import type {
   ProducerSetup,
   Profile,
   ProfileKey,
+  VenueSetup,
 } from "@/lib/types";
 
 // Page and Component Imports
 import { AuthScreen } from "@/pages/AuthScreen";
+import { PendingApprovalScreen } from "@/pages/PendingApprovalScreen";
 import { ProducerOnboardingScreen } from "@/pages/ProducerOnboardingScreen";
 import { ProfilePage } from "@/pages/ProfilePage";
+import { VenueProfilePage } from "@/pages/VenueProfilePage";
 import { LeadMapPanel, StatusBadge } from "@/pages/LeadMapPanel";
 import { AgentAvatar } from "@/components/AgentAvatar";
-import { createProduct } from "@/components/ProductEditor";
+import { createProduct, patchProducerProduct } from "@/components/ProductEditor";
 import { LocationSearch } from "@/components/LocationSearch";
 import { SectionLabel, FieldBlock, QuickChoiceRow } from "@/components/FormBlocks";
 
@@ -239,6 +251,8 @@ function App() {
   const [leadStatuses, setLeadStatuses] = useState<Record<string, LeadStatus>>({});
   const [leads, setLeads] = useState<Lead[]>([]);
   const [authChecking, setAuthChecking] = useState(true);
+  const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus | null>(null);
+  const [approvalRefreshing, setApprovalRefreshing] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [messageLead, setMessageLead] = useState<Lead | null>(null);
   const [messageDraft, setMessageDraft] = useState("");
@@ -253,6 +267,7 @@ function App() {
 
   const onboardingDone = currentStep >= onboardingSteps.length;
   const step = onboardingSteps[currentStep];
+  const isVenue = account?.accountType === "venue";
 
   const activeLeadCount = useMemo(
     () => Object.values(leadStatuses).filter((status) => status !== "Nu e potrivit").length,
@@ -274,20 +289,48 @@ function App() {
         }
 
         const user = data.user;
-        setAccount({ name: user.name, email: user.email });
+        const { accountType, approvalStatus: nextApprovalStatus } = await api.getAccount();
+        setAccount({ name: user.name, email: user.email, accountType });
 
-        const dto = await api.getProfile();
-        const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
-        setProfile(restoredProfile);
+        if (accountType === "admin") {
+          window.location.href = "/admin";
+          return;
+        }
 
-        const { leads: storedLeads } = await api.listLeads();
-        if (!cancelled) {
-          setLeads(enrichLeads(storedLeads));
-          const statuses: Record<string, LeadStatus> = {};
-          for (const lead of storedLeads) {
-            if (lead.status) statuses[lead.id] = lead.status;
+        if (nextApprovalStatus === "pending" || nextApprovalStatus === "rejected") {
+          setApprovalStatus(nextApprovalStatus);
+          setScreen("pending-approval");
+          return;
+        }
+
+        if (accountType === "venue") {
+          const venueDto = await api.getVenueProfile();
+          const restoredProfile = apiVenueProfileToFrontend(venueDto, { contactName: user.name });
+          setProfile(restoredProfile);
+
+          const { producers: matchedProducers } = await api.listMatchedProducers();
+          if (!cancelled) {
+            setLeads(matchedProducers);
+            const statuses: Record<string, LeadStatus> = {};
+            for (const producer of matchedProducers) {
+              if (producer.status) statuses[producer.id] = producer.status;
+            }
+            setLeadStatuses(statuses);
           }
-          setLeadStatuses(statuses);
+        } else {
+          const dto = await api.getProfile();
+          const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
+          setProfile(restoredProfile);
+
+          const { leads: storedLeads } = await api.listLeads();
+          if (!cancelled) {
+            setLeads(enrichLeads(storedLeads));
+            const statuses: Record<string, LeadStatus> = {};
+            for (const lead of storedLeads) {
+              if (lead.status) statuses[lead.id] = lead.status;
+            }
+            setLeadStatuses(statuses);
+          }
         }
 
         setScreen("chat");
@@ -336,11 +379,13 @@ function App() {
     if (messageLead?.id === lead.id && messageDraft) {
       textMsg = messageDraft;
     } else {
-      const productSummary = summarizeProducts(profile.products);
+      const productSummary = isVenue
+        ? profile.product || ""
+        : summarizeProducts(profile.products).full || profile.product || "";
       try {
         const { message } = await api.draftMessage({
           businessName: lead.name,
-          productSummary: productSummary.full || profile.product || "",
+          productSummary,
           locality: profile.location || "",
           tone: lead.tone,
         });
@@ -357,12 +402,17 @@ function App() {
     if (!reason.trim()) return;
     setFailedFeedbacks((prev) => ({ ...prev, [leadId]: reason }));
     setLeadStatuses((prev) => ({ ...prev, [leadId]: "Nu e potrivit" }));
-    void api.updateLeadStatus(leadId, "Nu e potrivit").catch(() => undefined);
+    void (isVenue
+      ? api.updateProducerMatchStatus(leadId, "Nu e potrivit")
+      : api.updateLeadStatus(leadId, "Nu e potrivit")
+    ).catch(() => undefined);
 
     const targetLead = leads.find((l) => l.id === leadId);
     if (targetLead) {
       addAgentText(
-        `Am înțeles. Am marcat ${targetLead.name} ca fiind nepotrivit deoarece: "${reason}". Am stocat acest feedback în memoria AI ca să excludem afaceri similare din recomandările viitoare.`,
+        isVenue
+          ? `Am înțeles. Am marcat ${targetLead.name} ca nepotrivit deoarece: "${reason}". Voi prioritiza alți producători pentru următoarele recomandări.`
+          : `Am înțeles. Am marcat ${targetLead.name} ca fiind nepotrivit deoarece: "${reason}". Am stocat acest feedback în memoria AI ca să excludem afaceri similare din recomandările viitoare.`,
         360
       );
     }
@@ -410,11 +460,13 @@ function App() {
     setMessageDraft(lead.contact);
     setMessageDraftLoading(true);
 
-    const productSummary = summarizeProducts(profile.products);
+    const productSummary = isVenue
+      ? profile.product || ""
+      : summarizeProducts(profile.products).full || profile.product || "";
     void api
       .draftMessage({
         businessName: lead.name,
-        productSummary: productSummary.full || profile.product || "",
+        productSummary,
         locality: profile.location || "",
         tone: lead.tone,
       })
@@ -443,6 +495,95 @@ function App() {
     } finally {
       setProfileSaving(false);
     }
+  }
+
+  async function saveVenueProfile() {
+    setProfileSaving(true);
+    setProfileSaved(false);
+    setProfileSaveError(null);
+    try {
+      const dto = await api.updateVenueProfile({
+        businessName: profile.businessName || "",
+        venueType: profile.venueType || "restaurant",
+        phone: profile.phone || "",
+        location: profile.location || "",
+        locationChoice: profile.locationChoice?.label ?? null,
+        latitude: profile.locationChoice?.lat ? Number.parseFloat(profile.locationChoice.lat) : null,
+        longitude: profile.locationChoice?.lon ? Number.parseFloat(profile.locationChoice.lon) : null,
+        productsNeeded: profile.product || "",
+        supplyFrequency: profile.quantity || "",
+        preferredDays: profile.days || "",
+      });
+      setProfile((current) =>
+        apiVenueProfileToFrontend(dto, { contactName: current.producerName }),
+      );
+      setProfileSaved(true);
+
+      const { producers: matchedProducers } = await api.listMatchedProducers();
+      setLeads(matchedProducers);
+      const statuses: Record<string, LeadStatus> = {};
+      for (const producer of matchedProducers) {
+        if (producer.status) statuses[producer.id] = producer.status;
+      }
+      setLeadStatuses(statuses);
+    } catch (error) {
+      setProfileSaved(false);
+      setProfileSaveError(messageFromUnknownError(error, "Nu am putut salva profilul. Încearcă din nou."));
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  function addVenueRecommendations(delay = 740) {
+    setTyping(true);
+    window.setTimeout(async () => {
+      try {
+        const { producers: matchedProducers } = await api.listMatchedProducers();
+        setLeads(matchedProducers);
+        const statuses: Record<string, LeadStatus> = {};
+        for (const producer of matchedProducers) {
+          if (producer.status) statuses[producer.id] = producer.status;
+        }
+        setLeadStatuses(statuses);
+
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text:
+              matchedProducers.length > 0
+                ? "Am găsit câțiva producători locali potriviți. Îți las mai jos recomandările și de ce merită contactați."
+                : "Nu am găsit producători în zona ta acum. Actualizează produsele căutate sau localitatea din profil.",
+            time: now(),
+          },
+          ...matchedProducers.map<ChatMessage>((producer) => ({
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "lead",
+            leadId: producer.id,
+            time: now(),
+          })),
+        ]);
+      } catch (error) {
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text: messageFromUnknownError(
+              error,
+              "Nu am putut încărca producătorii. Verifică conexiunea la server.",
+            ),
+            time: now(),
+          },
+        ]);
+      } finally {
+        setTyping(false);
+      }
+    }, delay);
   }
 
   function addRecommendations(delay = 740) {
@@ -551,43 +692,170 @@ function App() {
     }
   }
 
-  async function handleLogin(email: string, password: string) {
-    const result = await authClient.signIn.email({ email, password });
-    if (result.error) {
-      throw new Error(messageFromAuthError(result.error));
+  function startVenueChat(nextProfile: Profile, contactName?: string) {
+    const greetingName = contactName ? `, ${contactName}` : "";
+    const introMessages: ChatMessage[] = [
+      {
+        id: crypto.randomUUID(),
+        role: "agent",
+        kind: "text",
+        text: `Bun venit${greetingName}. Am salvat profilul localului tău și îl folosesc ca să găsim producători potriviți din Dobrogea.`,
+        time: now(),
+      },
+    ];
+
+    if (nextProfile.product || nextProfile.location) {
+      introMessages.push({
+        id: crypto.randomUUID(),
+        role: "agent",
+        kind: "text",
+        text: `Cauți ${nextProfile.product || "produse locale"} în zona ${nextProfile.location || "Dobrogea"}${nextProfile.days ? `, cu livrare preferată ${nextProfile.days}` : ""}.`,
+        time: now(),
+      });
     }
 
-    const user = result.data!.user;
-    setAccount({ name: user.name, email: user.email });
+    setProfile(nextProfile);
+    setMessages(introMessages);
+    setCurrentStep(onboardingSteps.length);
+    setTyping(false);
+    setMobileChatOpen(false);
+    setDashboardView("chat");
+    setScreen("chat");
+    addVenueRecommendations(680);
+  }
+
+  async function restoreAuthenticatedSession(user: { name: string; email: string }) {
+    const { accountType, approvalStatus: nextApprovalStatus } = await api.getAccount();
+    setAccount({ name: user.name, email: user.email, accountType });
+
+    if (accountType === "admin") {
+      window.location.href = "/admin";
+      return;
+    }
+
+    if (nextApprovalStatus === "pending" || nextApprovalStatus === "rejected") {
+      setApprovalStatus(nextApprovalStatus);
+      setScreen("pending-approval");
+      return;
+    }
+
+    if (accountType === "venue") {
+      const venueDto = await api.getVenueProfile();
+      const restoredProfile = apiVenueProfileToFrontend(venueDto, { contactName: user.name });
+      const { producers: matchedProducers } = await api.listMatchedProducers();
+      setLeads(matchedProducers);
+      const statuses: Record<string, LeadStatus> = {};
+      for (const producer of matchedProducers) {
+        if (producer.status) statuses[producer.id] = producer.status;
+      }
+      setLeadStatuses(statuses);
+      startVenueChat(restoredProfile, user.name);
+      return;
+    }
 
     const dto = await api.getProfile();
     const restoredProfile = apiProfileToFrontend(dto, { producerName: user.name });
     startChatWithProfile(restoredProfile, user.name);
   }
 
-  async function handleRegister(email: string, password: string, setup: ProducerSetup) {
-    const name = setup.producerName.trim() || "Producător local";
+  async function handleLogout() {
+    await authClient.signOut();
+    setAccount(null);
+    setApprovalStatus(null);
+    setScreen("auth");
+  }
+
+  async function handleRefreshApproval() {
+    if (!account) return;
+    setApprovalRefreshing(true);
+    try {
+      const { approvalStatus: nextApprovalStatus } = await api.getAccount();
+      if (nextApprovalStatus === "approved") {
+        setApprovalStatus(null);
+        await restoreAuthenticatedSession({ name: account.name, email: account.email });
+        return;
+      }
+      if (nextApprovalStatus) {
+        setApprovalStatus(nextApprovalStatus);
+      }
+    } finally {
+      setApprovalRefreshing(false);
+    }
+  }
+
+  async function handleLogin(email: string, password: string) {
+    const result = await authClient.signIn.email({ email, password });
+    if (result.error) {
+      throw new Error(messageFromAuthError(result.error));
+    }
+
+    await restoreAuthenticatedSession(result.data!.user);
+  }
+
+  async function handleRegister(
+    email: string,
+    password: string,
+    accountType: AccountType,
+    setup: ProducerSetup | VenueSetup,
+  ) {
+    const name =
+      accountType === "producer"
+        ? (setup as ProducerSetup).producerName.trim() || "Producător local"
+        : (setup as VenueSetup).contactName.trim() || "Local din Dobrogea";
     const result = await authClient.signUp.email({ email, password, name });
     if (result.error) {
       throw new Error(messageFromAuthError(result.error));
     }
 
-    setAccount({ name, email });
-    await api.updateProfile(setupToApiPayload(setup));
+    setAccount({ name, email, accountType });
 
-    const productSummary = summarizeProducts(setup.products);
+    if (accountType === "venue") {
+      const venueSetup = setup as VenueSetup;
+      await api.updateVenueProfile(setupVenueToApiPayload(venueSetup));
+      const { approvalStatus: nextApprovalStatus } = await api.getAccount();
+      if (nextApprovalStatus !== "approved") {
+        setApprovalStatus(nextApprovalStatus || "pending");
+        setScreen("pending-approval");
+        return;
+      }
+      startVenueChat(
+        {
+          producerName: venueSetup.contactName,
+          businessName: venueSetup.businessName,
+          phone: venueSetup.phone,
+          product: venueSetup.productsNeeded,
+          quantity: venueSetup.supplyFrequency,
+          location: venueSetup.location,
+          locationChoice: venueSetup.locationChoice,
+          days: venueSetup.preferredDays,
+        },
+        name,
+      );
+      return;
+    }
+
+    const producerSetup = setup as ProducerSetup;
+    await api.updateProfile(setupToApiPayload(producerSetup));
+    const { approvalStatus: nextApprovalStatus } = await api.getAccount();
+    if (nextApprovalStatus !== "approved") {
+      setApprovalStatus(nextApprovalStatus || "pending");
+      setScreen("pending-approval");
+      return;
+    }
+
+    const productSummary = summarizeProducts(producerSetup.products);
     startChatWithProfile(
       {
-        producerName: setup.producerName,
-        businessName: setup.businessName,
-        phone: setup.phone,
-        products: setup.products,
+        producerName: producerSetup.producerName,
+        businessName: producerSetup.businessName,
+        phone: producerSetup.phone,
+        products: producerSetup.products,
         product: productSummary.product,
         quantity: productSummary.quantity,
-        location: setup.location,
-        locationChoice: setup.locationChoice,
-        range: setup.range,
-        days: setup.days,
+        location: producerSetup.location,
+        locationChoice: producerSetup.locationChoice,
+        range: producerSetup.range,
+        days: producerSetup.days,
       },
       name,
     );
@@ -632,8 +900,15 @@ function App() {
     applyProfileProducts(nextProducts);
   }
 
+  function patchProfileProduct(productId: string, patch: Partial<ProducerProduct>) {
+    const nextProducts = (profile.products || []).map((product) =>
+      product.id === productId ? patchProducerProduct(product, patch) : product,
+    );
+    applyProfileProducts(nextProducts);
+  }
+
   function addProfileProduct() {
-    applyProfileProducts([...(profile.products || []), createProduct({ availableFrom: profile.days || "Săptămâna asta" })]);
+    applyProfileProducts([...(profile.products || []), createProduct()]);
   }
 
   function removeProfileProduct(productId: string) {
@@ -641,6 +916,13 @@ function App() {
   }
 
   function updateProfileField(key: "location" | "range" | "days", value: string) {
+    setProfile((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateVenueProfileField(
+    key: "businessName" | "phone" | "location" | "product" | "quantity" | "days" | "venueType",
+    value: string,
+  ) {
     setProfile((current) => ({ ...current, [key]: value }));
   }
 
@@ -691,22 +973,28 @@ function App() {
 
   function updateLeadStatus(lead: Lead, status: LeadStatus) {
     setLeadStatuses((current) => ({ ...current, [lead.id]: status }));
-    void api.updateLeadStatus(lead.id, status).catch(() => undefined);
+    void (isVenue
+      ? api.updateProducerMatchStatus(lead.id, status)
+      : api.updateLeadStatus(lead.id, status)
+    ).catch(() => undefined);
 
-    const textByStatus: Record<LeadStatus, string> = {
-      Bun: `Am notat că ${lead.name} pare bun. Voi căuta mai multe locuri asemănătoare.`,
-      "Nu e potrivit": `În regulă, scot ${lead.name} din lista bună și caut recomandări mai apropiate de stilul tău.`,
-      Contactat: `Bravo. Am marcat ${lead.name} ca fiind contactat.`,
-      "A răspuns": `Excelent. Pentru ${lead.name}, următorul pas bun este să trimiți cantitatea disponibilă și ziua de livrare.`,
-      "A cumpărat": `Foarte bine. Am marcat ${lead.name} ca vânzare și voi ține minte tipul acesta de client.`,
-    };
+    const textByStatus: Record<LeadStatus, string> = isVenue
+      ? {
+          Bun: `Am notat că ${lead.name} pare potrivit. Voi prioritiza producători similari.`,
+          "Nu e potrivit": `În regulă, scot ${lead.name} din lista bună și caut alți producători mai potriviți.`,
+          Contactat: `Bravo. Am marcat ${lead.name} ca fiind contactat.`,
+          "A răspuns": `Excelent. Pentru ${lead.name}, următorul pas bun este să confirmi cantitățile și ziua de livrare.`,
+          "A cumpărat": `Foarte bine. Am marcat ${lead.name} ca furnizor activ și voi ține minte acest tip de colaborare.`,
+        }
+      : {
+          Bun: `Am notat că ${lead.name} pare bun. Voi căuta mai multe locuri asemănătoare.`,
+          "Nu e potrivit": `În regulă, scot ${lead.name} din lista bună și caut recomandări mai apropiate de stilul tău.`,
+          Contactat: `Bravo. Am marcat ${lead.name} ca fiind contactat.`,
+          "A răspuns": `Excelent. Pentru ${lead.name}, următorul pas bun este să trimiți cantitatea disponibilă și ziua de livrare.`,
+          "A cumpărat": `Foarte bine. Am marcat ${lead.name} ca vânzare și voi ține minte tipul acesta de client.`,
+        };
 
     addAgentText(textByStatus[status], 260);
-  }
-
-  function copySuggestedMessage() {
-    if (!messageLead) return;
-    navigator.clipboard?.writeText(messageDraft || messageLead.contact);
   }
 
   if (authChecking) {
@@ -731,6 +1019,18 @@ function App() {
     );
   }
 
+  if (screen === "pending-approval" && approvalStatus) {
+    return (
+      <PendingApprovalScreen
+        status={approvalStatus}
+        accountLabel={account?.accountType === "venue" ? "local" : "producător"}
+        onRefresh={handleRefreshApproval}
+        onLogout={handleLogout}
+        refreshing={approvalRefreshing}
+      />
+    );
+  }
+
   return (
     <main className="h-[100dvh] overflow-hidden bg-[#eef2e7] p-2 pb-[86px] text-foreground md:p-4 md:pb-4">
       <div className="mx-auto flex h-full w-full max-w-[1360px] flex-col overflow-hidden border border-[#d9d0b8] bg-card shadow-warm md:rounded-[24px]">
@@ -739,21 +1039,35 @@ function App() {
           activeLeadCount={displayLeadCount}
           activeView={dashboardView}
           onViewChange={setDashboardView}
+          isVenue={isVenue}
         />
 
         {dashboardView === "profile" ? (
-          <ProfilePage
-            profile={profile}
-            activeLeadCount={displayLeadCount}
-            saving={profileSaving}
-            saved={profileSaved}
-            saveError={profileSaveError}
-            onSave={() => void saveProfile()}
-            onProductAdd={addProfileProduct}
-            onProductRemove={removeProfileProduct}
-            onProductUpdate={updateProfileProduct}
-            onProfileFieldChange={updateProfileField}
-          />
+          isVenue ? (
+            <VenueProfilePage
+              profile={profile}
+              activeMatchCount={displayLeadCount}
+              saving={profileSaving}
+              saved={profileSaved}
+              saveError={profileSaveError}
+              onSave={() => void saveVenueProfile()}
+              onProfileFieldChange={updateVenueProfileField}
+            />
+          ) : (
+            <ProfilePage
+              profile={profile}
+              activeLeadCount={displayLeadCount}
+              saving={profileSaving}
+              saved={profileSaved}
+              saveError={profileSaveError}
+              onSave={() => void saveProfile()}
+              onProductAdd={addProfileProduct}
+              onProductRemove={removeProfileProduct}
+              onProductUpdate={updateProfileProduct}
+              onProductPatch={patchProfileProduct}
+              onProfileFieldChange={updateProfileField}
+            />
+          )
         ) : (
           <div
             className={cn(
@@ -770,6 +1084,7 @@ function App() {
               <ChatHeader
                 profile={profile}
                 activeLeadCount={displayLeadCount}
+                isVenue={isVenue}
               />
 
               <ScrollArea className="chat-pattern min-h-0 flex-1">
@@ -787,6 +1102,7 @@ function App() {
                       onStatus={updateLeadStatus}
                       onWhatsAppClick={handleWhatsAppRedirect}
                       onFailedClick={setFailedLeadDialog}
+                      isVenue={isVenue}
                     />
                   ))}
                   {typing ? <TypingBubble /> : null}
@@ -834,7 +1150,13 @@ function App() {
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
                     disabled={onboardingDone || typing}
-                    placeholder={onboardingDone ? "Alege un lead sau marchează ce s-a întâmplat" : step?.placeholder}
+                    placeholder={
+                      onboardingDone
+                        ? isVenue
+                          ? "Alege un producător sau marchează ce s-a întâmplat"
+                          : "Alege un lead sau marchează ce s-a întâmplat"
+                        : step?.placeholder
+                    }
                     className="bg-white/90"
                   />
                   <Button type="submit" size="icon" variant="honey" disabled={!input.trim() || onboardingDone || typing}>
@@ -862,6 +1184,7 @@ function App() {
                 onStatus={updateLeadStatus}
                 onWhatsAppClick={handleWhatsAppRedirect}
                 onFailedClick={setFailedLeadDialog}
+                isVenue={isVenue}
               />
             </div>
           </div>
@@ -876,13 +1199,12 @@ function App() {
         loading={messageDraftLoading}
         open={Boolean(messageLead)}
         onOpenChange={(open) => !open && setMessageLead(null)}
-        onCopy={copySuggestedMessage}
         onWhatsAppSend={() => handleWhatsAppRedirect(messageLead!)}
       />
 
       <Dialog open={Boolean(failedLeadDialog)} onOpenChange={(open) => !open && setFailedLeadDialog(null)}>
         <DialogContent className="max-w-md bg-[#fffdfa] border-[#d7ccb3]">
-          <DialogHeader>
+          <DialogHeader className="text-left">
             <DialogTitle className="text-[#263421] font-extrabold text-xl">De ce nu a mers contactarea?</DialogTitle>
             <DialogDescription className="text-[#62705a]">
               AI-ul va stoca acest motiv pentru a exclude recomandările similare în viitor.
@@ -950,11 +1272,13 @@ function DashboardHeader({
   activeLeadCount,
   activeView,
   onViewChange,
+  isVenue = false,
 }: {
   profile: Profile;
   activeLeadCount: number;
   activeView: DashboardView;
   onViewChange: (view: DashboardView) => void;
+  isVenue?: boolean;
 }) {
   const productSummary = summarizeProducts(profile.products);
   const activeTitle: Record<DashboardView, string> = {
@@ -970,13 +1294,16 @@ function DashboardHeader({
           <AgentAvatar small />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="truncate text-lg font-extrabold text-[#263421]">Warm Leads</p>
+              <p className="truncate text-lg font-extrabold text-[#263421]">
+                {isVenue ? "Producători locali" : "Warm Leads"}
+              </p>
               <Badge variant="olive" className="hidden sm:inline-flex">
                 {activeTitle[activeView]}
               </Badge>
             </div>
             <p className="truncate text-xs text-muted-foreground sm:text-sm">
-              {productSummary.product || "Produse"} · {profile.location || "Dobrogea"} · {activeLeadCount} lead-uri
+              {(isVenue ? profile.product : productSummary.product) || "Produse"} · {profile.location || "Dobrogea"} ·{" "}
+              {activeLeadCount} {isVenue ? "producători" : "lead-uri"}
             </p>
           </div>
         </div>
@@ -1075,10 +1402,12 @@ function ChatHeader({
   onBack,
   profile,
   activeLeadCount,
+  isVenue = false,
 }: {
   onBack?: () => void;
   profile: Profile;
   activeLeadCount: number;
+  isVenue?: boolean;
 }) {
   return (
     <header className="shrink-0 border-b border-[#d7ccb3] bg-[#f8f4ea] px-3 py-2.5 sm:px-5">
@@ -1092,16 +1421,24 @@ function ChatHeader({
         <AgentAvatar />
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate text-base font-extrabold text-[#24311f]">Asistent de vânzări</h1>
+            <h1 className="truncate text-base font-extrabold text-[#24311f]">
+              {isVenue ? "Asistent de aprovizionare" : "Asistent de vânzări"}
+            </h1>
             <Badge variant="olive" className="border-[#c8d9aa] bg-[#e8f0d7]">
               online
             </Badge>
           </div>
-          <p className="truncate text-sm text-muted-foreground">Recomandări locale și mesaje gata de trimis.</p>
+          <p className="truncate text-sm text-muted-foreground">
+            {isVenue
+              ? "Producători locali și mesaje gata de trimis."
+              : "Recomandări locale și mesaje gata de trimis."}
+          </p>
         </div>
       </div>
 
-      <Badge variant="warm">{activeLeadCount} lead-uri</Badge>
+      <Badge variant="warm">
+        {activeLeadCount} {isVenue ? "producători" : "lead-uri"}
+      </Badge>
       </div>
     </header>
   );
@@ -1142,6 +1479,7 @@ function MessageBubble({
   onStatus,
   onWhatsAppClick,
   onFailedClick,
+  isVenue = false,
 }: {
   message: ChatMessage;
   lead?: Lead;
@@ -1152,6 +1490,7 @@ function MessageBubble({
   onStatus: (lead: Lead, status: LeadStatus) => void;
   onWhatsAppClick: (lead: Lead) => void;
   onFailedClick: (lead: Lead) => void;
+  isVenue?: boolean;
 }) {
   if (message.kind === "lead" && lead) {
     return (
@@ -1167,6 +1506,7 @@ function MessageBubble({
             onStatus={onStatus}
             onWhatsAppClick={onWhatsAppClick}
             onFailedClick={onFailedClick}
+            isVenue={isVenue}
           />
           <p className="mt-1 pl-2 text-xs text-muted-foreground">{message.time}</p>
         </div>
@@ -1210,6 +1550,7 @@ function LeadCard({
   onStatus,
   onWhatsAppClick,
   onFailedClick,
+  isVenue = false,
 }: {
   lead: Lead;
   status?: LeadStatus;
@@ -1219,6 +1560,7 @@ function LeadCard({
   onStatus: (lead: Lead, status: LeadStatus) => void;
   onWhatsAppClick: (lead: Lead) => void;
   onFailedClick: (lead: Lead) => void;
+  isVenue?: boolean;
 }) {
   const Icon = leadIcon(lead.icon);
 
@@ -1268,14 +1610,14 @@ function LeadCard({
         ) : null}
 
         <p className="text-sm text-[#44533d]">
-          <span className="font-bold">Ai putea să-i vinzi:</span> {lead.sell}
+          <span className="font-bold">{isVenue ? "Oferă:" : "Ai putea să-i vinzi:"}</span> {lead.sell}
         </p>
 
         <div className="grid gap-2 sm:grid-cols-2 text-xs border-t border-[#eadfca] pt-3">
           {lead.phone && (
             <div>
               <span className="font-bold text-[#33412c]">📞 Contact:</span>{" "}
-              <span className="text-[#5a654f]">{lead.phone} ({lead.contactPerson || "Manager"})</span>
+              <span className="text-[#5a654f]">{lead.phone} ({lead.contactPerson || (isVenue ? "Producător" : "Manager")})</span>
             </div>
           )}
           {lead.supplyFrequency && (
@@ -1286,7 +1628,7 @@ function LeadCard({
           )}
           {lead.menuItems && (
             <div className="sm:col-span-2">
-              <span className="font-bold text-[#33412c]">🍽️ În meniu:</span>{" "}
+              <span className="font-bold text-[#33412c]">{isVenue ? "📦 Produse:" : "🍽️ În meniu:"}</span>{" "}
               <span className="text-[#5a654f]">{lead.menuItems}</span>
             </div>
           )}
@@ -1373,8 +1715,8 @@ function LeadDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-2xl overflow-y-auto">
+        <DialogHeader className="text-left">
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e9f0dc] text-[#4d6638]">
             <Icon className="h-6 w-6" />
           </div>
@@ -1417,7 +1759,6 @@ function ContactMessageDialog({
   loading,
   open,
   onOpenChange,
-  onCopy,
   onWhatsAppSend,
 }: {
   lead: Lead | null;
@@ -1425,37 +1766,65 @@ function ContactMessageDialog({
   loading: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCopy: () => void;
   onWhatsAppSend: () => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!open) setCopied(false);
+  }, [open]);
+
   if (!lead) return null;
+
+  async function handleCopy() {
+    const text = draft || lead!.contact;
+    if (!text.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-md overflow-hidden border-[#d7ccb3] bg-[#fffdfa] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Mesaj pentru {lead.name}</DialogTitle>
           <DialogDescription>Scurt, uman și potrivit pentru WhatsApp.</DialogDescription>
         </DialogHeader>
-        <div className="rounded-3xl border border-[#d7ccb3] bg-[#f6f1e6] p-4">
-          <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase text-muted-foreground">
+        <div className="w-full overflow-hidden rounded-3xl border border-[#d7ccb3] bg-[#f6f1e6] px-5 py-4 text-center">
+          <div className="mb-3 flex items-center justify-center gap-2 text-xs font-bold uppercase text-muted-foreground">
             <MessageCircle className="h-4 w-4" />
             Mesaj sugerat
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
           </div>
-          <p className="text-sm leading-relaxed text-[#2b3725]">{loading ? "Generez mesajul..." : draft}</p>
+          <p className="mx-auto w-full max-w-prose text-sm leading-relaxed text-[#2b3725]">
+            {loading ? "Generez mesajul..." : draft}
+          </p>
         </div>
-        <div className="rounded-2xl bg-[#e9f0dc] p-3 text-sm text-[#405235]">
+        <div className="w-full overflow-hidden rounded-2xl bg-[#e9f0dc] px-5 py-3 text-center text-sm text-[#405235]">
           Ton: {lead.tone}. Poți să-l trimiți așa sau să-l scurtezi cu detaliile tale.
         </div>
-        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <div className="flex w-full flex-col items-center justify-center gap-2 sm:flex-row sm:flex-wrap">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             <X className="h-4 w-4" />
             Închide
           </Button>
-          <Button variant="outline" onClick={onCopy} className="border-[#eadfca] text-[#2b3725] hover:bg-[#fff9eb]">
-            <Clipboard className="h-4 w-4" />
-            Copiază mesajul
+          <Button
+            variant="outline"
+            onClick={() => void handleCopy()}
+            className={cn(
+              copied
+                ? "border-[#bcd5b6] bg-[#dbefd7] text-[#2f643b]"
+                : "border-[#eadfca] text-[#2b3725] hover:bg-[#fff9eb]",
+            )}
+          >
+            {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
+            {copied ? "Mesajul a fost copiat" : "Copiază mesajul"}
           </Button>
           <Button
             className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold flex items-center justify-center gap-1.5"

@@ -61,4 +61,54 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  .auth-card-shell {
+    max-width: 28rem;
+    transition:
+      max-width 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+      transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .auth-card-shell--expanded {
+    max-width: 64rem;
+  }
+
+  .auth-card-header-enter {
+    animation: auth-header-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .auth-panel-enter {
+    animation: auth-panel-in 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes auth-header-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes auth-panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .auth-card-shell,
+    .auth-card-header-enter,
+    .auth-panel-enter {
+      animation: none;
+      transition: none;
+    }
+  }
 }

@@ -30,6 +30,11 @@ export async function updateMyProfile(userId: string, input: UpdateProfileInput)
   const { products, ...profileData } = input;
 
   const updated = await prisma.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: userId },
+      data: { accountType: "PRODUCER" },
+    });
+
     const nextProfile = await tx.producerProfile.update({
       where: { id: profile.id },
       data: profileData,

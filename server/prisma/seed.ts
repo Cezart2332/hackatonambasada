@@ -1,6 +1,16 @@
 import { LeadIcon, PrismaClient } from "@prisma/client";
+import { hashPassword } from "better-auth/crypto";
 
 const prisma = new PrismaClient();
+
+const ADMIN_EMAIL = "admin@flavours-of-dobrogea.ro";
+const ADMIN_PASSWORD = "flavours-admin";
+
+const DEMO_PRODUCER_EMAIL = "ana@stupina-dobrogea.ro";
+const DEMO_PRODUCER_PASSWORD = "demo1234";
+
+const DEMO_VENUE_EMAIL = "casa@dobrogea-demo.ro";
+const DEMO_VENUE_PASSWORD = "demo1234";
 
 const demoLeads: Array<{
   id: string;
@@ -104,7 +114,304 @@ const demoLeads: Array<{
   },
 ];
 
+async function seedAdmin() {
+  const passwordHash = await hashPassword(ADMIN_PASSWORD);
+
+  await prisma.user.upsert({
+    where: { email: ADMIN_EMAIL },
+    create: {
+      name: "Flavours of Dobrogea",
+      email: ADMIN_EMAIL,
+      emailVerified: true,
+      accountType: "ADMIN",
+      accounts: {
+        create: {
+          accountId: ADMIN_EMAIL,
+          providerId: "credential",
+          password: passwordHash,
+        },
+      },
+    },
+    update: {
+      accountType: "ADMIN",
+      name: "Flavours of Dobrogea",
+    },
+  });
+
+  const adminUser = await prisma.user.findUniqueOrThrow({ where: { email: ADMIN_EMAIL } });
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: adminUser.id, providerId: "credential" },
+  });
+
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: {
+        userId: adminUser.id,
+        accountId: ADMIN_EMAIL,
+        providerId: "credential",
+        password: passwordHash,
+      },
+    });
+  } else if (!existingAccount.password) {
+    await prisma.account.update({
+      where: { id: existingAccount.id },
+      data: { password: passwordHash },
+    });
+  }
+}
+
+async function upsertCredentialUser(params: {
+  email: string;
+  password: string;
+  name: string;
+  accountType: "PRODUCER" | "VENUE";
+}) {
+  const passwordHash = await hashPassword(params.password);
+
+  const user = await prisma.user.upsert({
+    where: { email: params.email },
+    create: {
+      name: params.name,
+      email: params.email,
+      emailVerified: true,
+      accountType: params.accountType,
+      accounts: {
+        create: {
+          accountId: params.email,
+          providerId: "credential",
+          password: passwordHash,
+        },
+      },
+    },
+    update: {
+      name: params.name,
+      accountType: params.accountType,
+    },
+  });
+
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: user.id, providerId: "credential" },
+  });
+
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: {
+        userId: user.id,
+        accountId: params.email,
+        providerId: "credential",
+        password: passwordHash,
+      },
+    });
+  } else if (!existingAccount.password) {
+    await prisma.account.update({
+      where: { id: existingAccount.id },
+      data: { password: passwordHash },
+    });
+  }
+
+  return user;
+}
+
+async function seedDemoProducer() {
+  const user = await upsertCredentialUser({
+    email: DEMO_PRODUCER_EMAIL,
+    password: DEMO_PRODUCER_PASSWORD,
+    name: "Ana Popescu",
+    accountType: "PRODUCER",
+  });
+
+  await prisma.producerProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      businessName: "Stupina Dobrogea",
+      phone: "+40 722 334 100",
+      location: "Murfatlar",
+      locationChoice: "Murfatlar, Constanța, România",
+      latitude: 44.1833,
+      longitude: 28.4167,
+      rangeKm: 60,
+      deliveryDays: "Marți și vineri dimineața",
+      approvalStatus: "APPROVED",
+      products: {
+        create: [
+          {
+            name: "Miere de salcâm",
+            estimatedQuantity: "40",
+            unit: "borcan 400g",
+            pricePerKg: "34",
+            availableFrom: "2026-06-01",
+          },
+          {
+            name: "Miere polifloră",
+            estimatedQuantity: "25",
+            unit: "borcan 400g",
+            pricePerKg: "28",
+            availableFrom: "2026-06-01",
+          },
+        ],
+      },
+    },
+    update: {
+      businessName: "Stupina Dobrogea",
+      phone: "+40 722 334 100",
+      location: "Murfatlar",
+      locationChoice: "Murfatlar, Constanța, România",
+      latitude: 44.1833,
+      longitude: 28.4167,
+      rangeKm: 60,
+      deliveryDays: "Marți și vineri dimineața",
+      approvalStatus: "APPROVED",
+    },
+  });
+
+  const profile = await prisma.producerProfile.findUniqueOrThrow({ where: { userId: user.id } });
+  await prisma.producerProduct.deleteMany({ where: { profileId: profile.id } });
+  await prisma.producerProduct.createMany({
+    data: [
+      {
+        profileId: profile.id,
+        name: "Miere de salcâm",
+        estimatedQuantity: "40",
+        unit: "borcan 400g",
+        pricePerKg: "34",
+        availableFrom: "2026-06-01",
+      },
+      {
+        profileId: profile.id,
+        name: "Miere polifloră",
+        estimatedQuantity: "25",
+        unit: "borcan 400g",
+        pricePerKg: "28",
+        availableFrom: "2026-06-01",
+      },
+    ],
+  });
+}
+
+async function seedDemoVenue() {
+  const user = await upsertCredentialUser({
+    email: DEMO_VENUE_EMAIL,
+    password: DEMO_VENUE_PASSWORD,
+    name: "Alexandru Radu",
+    accountType: "VENUE",
+  });
+
+  await prisma.venueProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      businessName: "Casa Dobrogeană",
+      venueType: LeadIcon.restaurant,
+      phone: "+40 722 334 455",
+      location: "Constanța, zona Peninsulă",
+      locationChoice: "Constanța, Constanța, România",
+      latitude: 44.1787,
+      longitude: 28.6538,
+      productsNeeded: "miere de salcâm, brânzeturi locale, legume de sezon",
+      supplyFrequency: "Săptămânal",
+      preferredDays: "Marți și vineri dimineața",
+      approvalStatus: "APPROVED",
+    },
+    update: {
+      businessName: "Casa Dobrogeană",
+      venueType: LeadIcon.restaurant,
+      phone: "+40 722 334 455",
+      location: "Constanța, zona Peninsulă",
+      locationChoice: "Constanța, Constanța, România",
+      latitude: 44.1787,
+      longitude: 28.6538,
+      productsNeeded: "miere de salcâm, brânzeturi locale, legume de sezon",
+      supplyFrequency: "Săptămânal",
+      preferredDays: "Marți și vineri dimineața",
+      approvalStatus: "APPROVED",
+    },
+  });
+}
+
+async function seedDemoProducer2() {
+  const user = await upsertCredentialUser({
+    email: "branza@babadag-demo.ro",
+    password: DEMO_PRODUCER_PASSWORD,
+    name: "Ion Marin",
+    accountType: "PRODUCER",
+  });
+
+  await prisma.producerProfile.upsert({
+    where: { userId: user.id },
+    create: {
+      userId: user.id,
+      businessName: "Brânzăria din Babadag",
+      phone: "+40 733 445 200",
+      location: "Babadag",
+      locationChoice: "Babadag, Tulcea, România",
+      latitude: 44.8972,
+      longitude: 28.7233,
+      rangeKm: 80,
+      deliveryDays: "Joi după-amiază",
+      approvalStatus: "APPROVED",
+      products: {
+        create: [
+          {
+            name: "Brânză de capră",
+            estimatedQuantity: "30",
+            unit: "kg",
+            pricePerKg: "42",
+            availableFrom: "2026-06-01",
+          },
+          {
+            name: "Telemea de vacă",
+            estimatedQuantity: "50",
+            unit: "kg",
+            pricePerKg: "28",
+            availableFrom: "2026-06-01",
+          },
+        ],
+      },
+    },
+    update: {
+      businessName: "Brânzăria din Babadag",
+      phone: "+40 733 445 200",
+      location: "Babadag",
+      locationChoice: "Babadag, Tulcea, România",
+      latitude: 44.8972,
+      longitude: 28.7233,
+      rangeKm: 80,
+      deliveryDays: "Joi după-amiază",
+      approvalStatus: "APPROVED",
+    },
+  });
+
+  const profile = await prisma.producerProfile.findUniqueOrThrow({ where: { userId: user.id } });
+  await prisma.producerProduct.deleteMany({ where: { profileId: profile.id } });
+  await prisma.producerProduct.createMany({
+    data: [
+      {
+        profileId: profile.id,
+        name: "Brânză de capră",
+        estimatedQuantity: "30",
+        unit: "kg",
+        pricePerKg: "42",
+        availableFrom: "2026-06-01",
+      },
+      {
+        profileId: profile.id,
+        name: "Telemea de vacă",
+        estimatedQuantity: "50",
+        unit: "kg",
+        pricePerKg: "28",
+        availableFrom: "2026-06-01",
+      },
+    ],
+  });
+}
+
 async function main() {
+  await seedAdmin();
+  await seedDemoProducer();
+  await seedDemoProducer2();
+  await seedDemoVenue();
+
   for (const lead of demoLeads) {
     await prisma.lead.upsert({
       where: { id: lead.id },

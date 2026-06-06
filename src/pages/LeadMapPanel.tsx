@@ -151,6 +151,7 @@ export function LeadMapPanel({
   onStatus,
   onWhatsAppClick,
   onFailedClick,
+  isVenue = false,
 }: {
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
@@ -161,18 +162,25 @@ export function LeadMapPanel({
   onStatus: (lead: Lead, status: LeadStatus) => void;
   onWhatsAppClick: (lead: Lead) => void;
   onFailedClick: (lead: Lead) => void;
+  isVenue?: boolean;
 }) {
   return (
     <aside className="flex h-full min-h-0 w-full flex-col bg-[#fbf7ed]">
       <div className="shrink-0 border-b border-[#d7ccb3] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-base font-extrabold text-[#263421]">Hartă lead-uri</p>
+            <p className="text-base font-extrabold text-[#263421]">
+              {isVenue ? "Hartă producători" : "Hartă lead-uri"}
+            </p>
             <p className="text-sm text-muted-foreground">
-              POI-uri cu restaurante, hoteluri și băcănii din Dobrogea.
+              {isVenue
+                ? "Producători locali din Dobrogea care livrează în zona ta."
+                : "POI-uri cu restaurante, hoteluri și băcănii din Dobrogea."}
             </p>
           </div>
-          <Badge variant="warm">{activeLeadCount} active</Badge>
+          <Badge variant="warm">
+            {activeLeadCount} {isVenue ? "activi" : "active"}
+          </Badge>
         </div>
       </div>
 

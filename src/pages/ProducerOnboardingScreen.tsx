@@ -13,8 +13,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LocationSearch } from "@/components/LocationSearch";
-import { ProductEditorCard, createProduct } from "@/components/ProductEditor";
+import { ProductEditorCard, createProduct, patchProducerProduct } from "@/components/ProductEditor";
 import { SectionLabel, FieldBlock, QuickChoiceRow } from "@/components/FormBlocks";
+import { normalizeAvailableFrom } from "@/lib/availableFrom";
 import type { ProducerSetup, LocationChoice, ProducerProduct } from "@/lib/types";
 
 function StepHint({ icon: Icon, text }: { icon: typeof MessageCircle; text: string }) {
@@ -43,11 +44,12 @@ export function ProducerOnboardingScreen({
     phone: "",
     products: [
       createProduct({
+        category: "miere_gemuri",
         name: "Miere de salcâm",
         estimatedQuantity: "40",
-        unit: "kg",
+        packaging: "borcan_400",
+        baseUnit: "piece",
         pricePerKg: "34",
-        availableFrom: "Săptămâna asta",
       }),
     ],
     location: "",
@@ -72,10 +74,19 @@ export function ProducerOnboardingScreen({
     }));
   };
 
+  const patchProduct = (productId: string, patch: Partial<ProducerProduct>) => {
+    setSetup((current) => ({
+      ...current,
+      products: current.products.map((product) =>
+        product.id === productId ? patchProducerProduct(product, patch) : product,
+      ),
+    }));
+  };
+
   const addProduct = () => {
     setSetup((current) => ({
       ...current,
-      products: [...current.products, createProduct({ availableFrom: current.days || "Săptămâna asta" })],
+      products: [...current.products, createProduct()],
     }));
   };
 
@@ -91,14 +102,18 @@ export function ProducerOnboardingScreen({
 
   function submitSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const cleanProducts = setup.products.map((product, index) => ({
-      ...product,
-      name: product.name.trim() || (index === 0 ? "Miere de salcâm" : "Produs local"),
-      estimatedQuantity: product.estimatedQuantity.trim() || "40",
-      unit: product.unit.trim() || "kg",
-      pricePerKg: product.pricePerKg.trim() || "30",
-      availableFrom: product.availableFrom.trim() || setup.days || "Săptămâna asta",
-    }));
+    const cleanProducts = setup.products.map((product, index) =>
+      patchProducerProduct(
+        {
+          ...product,
+          name: product.name.trim() || (index === 0 ? "Miere de salcâm" : "Produs local"),
+          estimatedQuantity: product.estimatedQuantity.trim() || "40",
+          pricePerKg: product.pricePerKg.trim() || "30",
+          availableFrom: normalizeAvailableFrom(product.availableFrom, setup.days),
+        },
+        {},
+      ),
+    );
 
     onComplete({
       ...setup,
@@ -201,7 +216,7 @@ export function ProducerOnboardingScreen({
                 }}
               />
 
-              <div className="space-y-3">
+              <div className="space-y-5">
                 {setup.products.map((product, index) => (
                   <ProductEditorCard
                     key={product.id}
@@ -209,6 +224,7 @@ export function ProducerOnboardingScreen({
                     index={index}
                     canRemove={setup.products.length > 1}
                     onUpdate={updateProduct}
+                    onPatch={patchProduct}
                     onRemove={removeProduct}
                   />
                 ))}

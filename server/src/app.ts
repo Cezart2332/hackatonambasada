@@ -9,6 +9,9 @@ import { geoRouter } from "./modules/geo/geo.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { leadsRouter } from "./modules/leads/lead.routes.js";
 import { producersRouter } from "./modules/producers/producer.routes.js";
+import { venuesRouter } from "./modules/venues/venue.routes.js";
+import { accountRouter } from "./modules/account/account.routes.js";
+import { adminRouter } from "./modules/admin/admin.routes.js";
 
 export function createApp() {
   const app = express();
@@ -27,6 +30,9 @@ export function createApp() {
 
   app.use("/api/health", healthRouter);
   app.use("/api/producers", producersRouter);
+  app.use("/api/venues", venuesRouter);
+  app.use("/api/account", accountRouter);
+  app.use("/api/admin", adminRouter);
   app.use("/api/leads", leadsRouter);
   app.use("/api/geo", geoRouter);
   app.use("/api/ai", aiProxyRouter);

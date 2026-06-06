@@ -1,8 +1,51 @@
 import { AppError } from "../../shared/errors/AppError.js";
+import { prisma } from "../../shared/prisma.js";
 import { getPlanContext } from "../billing/plan.service.js";
+import { searchLocations } from "../geo/geo.service.js";
 import { listDiscoveredLeads } from "./lead.ai.js";
 
 const STATUS_ORDER = ["Bun", "Contactat", "A răspuns", "A cumpărat"] as const;
+const DEFAULT_LAT = 44.1699;
+const DEFAULT_LON = 28.6348;
+const geocodedLocalityCache = new Map<string, { latitude: number; longitude: number }>();
+
+async function getStatsOrigin(userId: string) {
+  const profile = await prisma.producerProfile.findUnique({ where: { userId } });
+  if (!profile) return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+  if (profile.latitude != null && profile.longitude != null) {
+    return { latitude: profile.latitude, longitude: profile.longitude };
+  }
+
+  const locality = (profile.locationChoice || profile.location || "").trim();
+  if (!locality) return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+
+  const cacheKey = locality.toLowerCase();
+  const cached = geocodedLocalityCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const [first] = await searchLocations(`${locality}, Dobrogea, România`);
+    if (first) {
+      const coords = { latitude: first.latitude, longitude: first.longitude };
+      geocodedLocalityCache.set(cacheKey, coords);
+      await prisma.producerProfile
+        .update({
+          where: { id: profile.id },
+          data: {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            locationChoice: profile.locationChoice || first.label,
+          },
+        })
+        .catch(() => undefined);
+      return coords;
+    }
+  } catch {
+    return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+  }
+
+  return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+}
 
 export async function getLeadStatsForUser(userId: string, accountType?: string) {
   const plan = await getPlanContext(userId, accountType);
@@ -14,7 +57,8 @@ export async function getLeadStatsForUser(userId: string, accountType?: string) 
     );
   }
 
-  const listed = await listDiscoveredLeads(userId, 44.17, 28.63);
+  const origin = await getStatsOrigin(userId);
+  const listed = await listDiscoveredLeads(userId, origin.latitude, origin.longitude);
   const leads = listed ?? [];
 
   const pipeline: Record<string, number> = {

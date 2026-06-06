@@ -67,12 +67,13 @@ def _build_lead_dto(
             f"Aș dori să vă propun produse locale — pot trimite cantități și prețuri dacă vă ajută."
         )
 
+    # Distance is a minor factor — product overlap and semantic similarity are primary
     match_score = int(
         min(
             99,
             max(
                 55,
-                60 + overlap * 30 + similarity * 10 - min(15, distance_km / 5),
+                60 + overlap * 45 + similarity * 20 - min(5, distance_km / 20),
             ),
         )
     )
@@ -180,7 +181,8 @@ def discover_leads(
             )
         )
 
-    leads.sort(key=lambda item: (-item["match"], float(item["distance"].replace(" km", ""))))
+    # Sort by match score first, then by product overlap (not distance)
+    leads.sort(key=lambda item: (-item["match"], -len(item.get("matchedNeeds", []))))
     leads = leads[:limit]
 
     for lead in leads:

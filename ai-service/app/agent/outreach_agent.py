@@ -103,13 +103,17 @@ def draft_outreach_message(
     )
 
     prompt = (
-        f"Scrie un mesaj scurt de outreach în română pentru un producător local.\n\n"
+        f"Scrie un mesaj WhatsApp natural, scurt, în română, pentru un producător local.\n\n"
         f"Afacere țintă: {business_name} ({business_type or 'local'})\n"
         f"Producător: {product_summary or 'produse locale'} din {locality or 'Dobrogea'}\n"
         f"Ton: {tone}\n"
         f"{extra}\n\n"
-        "Reguli: 4–8 propoziții, fără presiune, menționează potrivirea concretă cu meniul/oferta, "
-        "propune lot mic de probă. NU inventa detalii care nu apar mai sus. "
+        "Reguli stricte:\n"
+        "- 3–5 propoziții, ca un mesaj scris de un om, nu ca text de marketing.\n"
+        "- Prima propoziție trebuie să fie concretă și să lege produsul de meniul/oferta localului, dacă există date.\n"
+        "- Evită formule generice precum „vă propunem o colaborare”, „suntem încântați”, „soluții personalizate”.\n"
+        "- Cere un răspuns simplu: dacă vor preț/listă/cantitate pentru o probă mică.\n"
+        "- NU inventa detalii care nu apar mai sus.\n"
         "Returnează DOAR textul mesajului, fără titluri sau explicații."
     )
 

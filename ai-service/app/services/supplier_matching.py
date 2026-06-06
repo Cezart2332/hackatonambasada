@@ -52,8 +52,9 @@ def _build_supplier_dto(
             f"pentru aprovizionare în Dobrogea. Ce aveți disponibil și la ce preț puteți livra?"
         )
 
+    # Distance is a minor factor — product overlap and semantic similarity are primary
     match_score = int(
-        min(99, max(55, 60 + overlap * 30 + similarity * 10 - min(15, distance_km / 5)))
+        min(99, max(55, 60 + overlap * 45 + similarity * 20 - min(5, distance_km / 20)))
     )
 
     website = row.get("website") or ""
@@ -166,7 +167,8 @@ def discover_suppliers(
             )
         )
 
-    leads.sort(key=lambda item: (-item["match"], float(item["distance"].replace(" km", ""))))
+    # Sort by match score first, then by product overlap (not distance)
+    leads.sort(key=lambda item: (-item["match"], -len(item.get("matchedNeeds", []))))
     leads = leads[:limit]
 
     for lead in leads:

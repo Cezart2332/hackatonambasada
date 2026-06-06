@@ -44,8 +44,10 @@ export function MatchWhySection({ lead, isVenue = false }: { lead: Lead; isVenue
                 </p>
               ) : null}
             </>
+          ) : isVenue ? (
+            <p>Detaliile de potrivire nu sunt disponibile momentan.</p>
           ) : (
-            <p>{isVenue ? lead.reason : lead.reason}</p>
+            <p>{lead.reason}</p>
           )}
         </div>
       ) : null}

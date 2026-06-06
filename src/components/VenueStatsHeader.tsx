@@ -18,16 +18,11 @@ export function VenueStatsHeader({
 }) {
   const active = Object.values(statuses).filter((s) => s !== "Nu e potrivit").length;
   const contacted = Object.values(statuses).filter((s) => s === "Contactat" || s === "A răspuns" || s === "A cumpărat").length;
-  const matchSum = leads.reduce((sum, lead) => sum + (lead.match ?? 0), 0);
-  const distSum = leads.reduce((sum, lead) => sum + (Number.parseFloat(String(lead.distance).replace(" km", "")) || 0), 0);
-  const avgMatch = leads.length ? Math.round(matchSum / leads.length) : 0;
-  const avgDist = leads.length ? Math.round(distSum / leads.length) : 0;
 
   return (
-    <div className="grid gap-2 rounded-2xl border border-[#c8d9aa] bg-[#f0f5e8] px-3 py-2 text-xs sm:grid-cols-3 sm:text-sm">
+    <div className="grid gap-2 rounded-xl border border-[#d7e4c4] bg-[#f4f8ee] px-3 py-1.5 text-xs sm:grid-cols-2 sm:text-sm">
       <StatPill label="Potriviți" value={`${leads.length} producători · ${active} activi`} />
       <StatPill label="Contact" value={`${contacted} contactați / răspuns`} />
-      <StatPill label="Calitate" value={`${avgMatch}% · ${avgDist} km mediu`} />
     </div>
   );
 }

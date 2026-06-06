@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { LayoutGrid, List, Loader2, MapPin, Search, Sparkles } from "lucide-react";
+import { LayoutGrid, List, Loader2, MapPin, Search, SlidersHorizontal, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -267,11 +267,21 @@ export function DirectorPage({
     (!isVenue && typeFilter !== "all" ? 1 : 0) +
     (productFilter ? 1 : 0) +
     (statusFilter !== "all" ? 1 : 0) +
-    (isVenue && rangeFilter !== "all" ? 1 : 0);
+    (isVenue && rangeFilter !== "all" ? 1 : 0) +
+    (sortKey !== "match" ? 1 : 0);
+
+  const resetFilters = () => {
+    setDistanceFilter("all");
+    setTypeFilter("all");
+    setProductFilter(null);
+    setSortKey("match");
+    setStatusFilter("all");
+    setRangeFilter("all");
+  };
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#fbf7ed]">
-      <div className="sticky top-0 z-10 shrink-0 space-y-2 border-b border-[#d7ccb3] bg-[#fbf7ed] px-3 py-2 lg:space-y-3 lg:px-4 lg:py-3">
+      <div className="sticky top-0 z-10 shrink-0 space-y-1.5 border-b border-[#d7ccb3] bg-[#fbf7ed] px-3 py-2 lg:px-4 lg:py-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <p className="hidden items-center gap-2 text-base font-extrabold text-[#263421] lg:flex">
@@ -302,21 +312,24 @@ export function DirectorPage({
           </div>
         )}
 
-        {isVenue && onVenueProducerScopeChange ? (
-          <VenueProducerScopeToggle
-            scope={venueProducerScope}
-            onChange={onVenueProducerScopeChange}
-          />
-        ) : null}
-
-        <div className="flex items-center gap-2 lg:hidden">
+        <div className="flex flex-wrap items-center gap-2">
+          {isVenue && onVenueProducerScopeChange ? (
+            <VenueProducerScopeToggle
+              scope={venueProducerScope}
+              onChange={onVenueProducerScopeChange}
+            />
+          ) : null}
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-8 flex-1 border-[#ded5bf] bg-white text-xs"
+            className={cn(
+              "h-8 border-[#ded5bf] bg-white text-xs",
+              isVenue && onVenueProducerScopeChange ? "" : "flex-1 sm:flex-none",
+            )}
             onClick={() => setFiltersOpen((open) => !open)}
           >
+            <SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />
             Filtre{activeFilterCount ? ` (${activeFilterCount})` : ""}
           </Button>
           {onSearchMore ? (
@@ -326,106 +339,103 @@ export function DirectorPage({
               variant="outline"
               disabled={searchingMore}
               onClick={onSearchMore}
-              className="h-8 shrink-0 border-[#c8d9aa] bg-[#f0f5e8] px-2.5 text-[#3f532c]"
+              className="h-8 shrink-0 border-[#c8d9aa] bg-[#f0f5e8] px-2.5 text-xs text-[#3f532c] hover:bg-[#e3edd4] lg:px-3"
             >
-              {searchingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+              {searchingMore ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5 lg:mr-1.5" />
+              )}
+              <span className="hidden lg:inline">
+                {isVenue ? "Vezi toți producătorii" : "Caută alte lead-uri"}
+              </span>
             </Button>
           ) : null}
         </div>
 
-        <div
-          className={cn(
-            "space-y-2",
-            filtersOpen ? "block" : "hidden lg:block",
-          )}
-        >
-          <FilterRow>
-            {(["all", "10", "25"] as DistanceFilter[]).map((value) => (
-              <FilterChip
-                key={value}
-                active={distanceFilter === value}
-                label={value === "all" ? "Toată raza" : `<${value} km`}
-                onClick={() => setDistanceFilter(value)}
-              />
-            ))}
-          </FilterRow>
-
-          {!isVenue ? (
-            <FilterRow>
-              {(["all", "restaurant", "hotel", "cafe", "shop"] as TypeFilter[]).map((value) => (
+        <div className={cn(filtersOpen ? "block" : "hidden")}>
+          <div className="space-y-2.5 rounded-2xl border border-[#ded5bf] bg-white p-3">
+            <FilterSection label="Distanță">
+              {(["all", "10", "25"] as DistanceFilter[]).map((value) => (
                 <FilterChip
                   key={value}
-                  active={typeFilter === value}
-                  label={value === "all" ? "Toate tipurile" : value}
-                  onClick={() => setTypeFilter(value)}
+                  active={distanceFilter === value}
+                  label={value === "all" ? "Toată raza" : `<${value} km`}
+                  onClick={() => setDistanceFilter(value)}
                 />
               ))}
-            </FilterRow>
-          ) : null}
+            </FilterSection>
 
-          {filterProductChips.length ? (
-            <FilterRow>
-              <FilterChip
-                active={productFilter === null}
-                label="Toate produsele"
-                onClick={() => setProductFilter(null)}
-              />
-              {filterProductChips.map((name) => (
+            {!isVenue ? (
+              <FilterSection label="Tip">
+                {(["all", "restaurant", "hotel", "cafe", "shop"] as TypeFilter[]).map((value) => (
+                  <FilterChip
+                    key={value}
+                    active={typeFilter === value}
+                    label={value === "all" ? "Toate tipurile" : value}
+                    onClick={() => setTypeFilter(value)}
+                  />
+                ))}
+              </FilterSection>
+            ) : null}
+
+            {filterProductChips.length ? (
+              <FilterSection label="Produs">
                 <FilterChip
-                  key={name}
-                  active={productFilter === name}
-                  label={name}
-                  onClick={() => setProductFilter(name)}
+                  active={productFilter === null}
+                  label="Toate produsele"
+                  onClick={() => setProductFilter(null)}
+                />
+                {filterProductChips.map((name) => (
+                  <FilterChip
+                    key={name}
+                    active={productFilter === name}
+                    label={name}
+                    onClick={() => setProductFilter(name)}
+                  />
+                ))}
+              </FilterSection>
+            ) : null}
+
+            <FilterSection label="Sortare">
+              {([
+                ["match", "Potrivire"],
+                ["distance", "Distanță"],
+                ["name", "Nume"],
+              ] as Array<[SortKey, string]>).map(([value, label]) => (
+                <FilterChip key={value} active={sortKey === value} label={label} onClick={() => setSortKey(value)} />
+              ))}
+            </FilterSection>
+
+            <FilterSection label="Status">
+              {(["all", "Bun", "Contactat", "A răspuns", "Nu e potrivit"] as StatusFilter[]).map((value) => (
+                <FilterChip
+                  key={value}
+                  active={statusFilter === value}
+                  label={value === "all" ? "Toate statusurile" : value}
+                  onClick={() => setStatusFilter(value)}
                 />
               ))}
-            </FilterRow>
-          ) : null}
-          <FilterRow>
-            {([
-              ["match", "Potrivire"],
-              ["distance", "Distanță"],
-              ["name", "Nume"],
-            ] as Array<[SortKey, string]>).map(([value, label]) => (
-              <FilterChip key={value} active={sortKey === value} label={label} onClick={() => setSortKey(value)} />
-            ))}
-          </FilterRow>
+            </FilterSection>
 
-          <FilterRow>
-            {(["all", "Bun", "Contactat", "A răspuns", "Nu e potrivit"] as StatusFilter[]).map((value) => (
-              <FilterChip
-                key={value}
-                active={statusFilter === value}
-                label={value === "all" ? "Toate statusurile" : value}
-                onClick={() => setStatusFilter(value)}
-              />
-            ))}
-          </FilterRow>
+            {isVenue ? (
+              <FilterSection label="Livrare">
+                <FilterChip active={rangeFilter === "all"} label="Toată raza" onClick={() => setRangeFilter("all")} />
+                <FilterChip active={rangeFilter === "inRange"} label="Livrare la mine" onClick={() => setRangeFilter("inRange")} />
+              </FilterSection>
+            ) : null}
 
-          {isVenue ? (
-            <FilterRow>
-              <FilterChip active={rangeFilter === "all"} label="Toată raza" onClick={() => setRangeFilter("all")} />
-              <FilterChip active={rangeFilter === "inRange"} label="Livrare la mine" onClick={() => setRangeFilter("inRange")} />
-            </FilterRow>
-          ) : null}
+            {activeFilterCount > 0 ? (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="text-xs font-semibold text-[#4d6638] underline-offset-2 hover:underline"
+              >
+                Resetează filtre
+              </button>
+            ) : null}
+          </div>
         </div>
-
-        {onSearchMore ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={searchingMore}
-            onClick={onSearchMore}
-            className="hidden w-full border-[#c8d9aa] bg-[#f0f5e8] text-[#3f532c] hover:bg-[#e3edd4] lg:flex"
-          >
-            {searchingMore ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Search className="h-4 w-4" />
-            )}
-            {isVenue ? "Vezi toți producătorii" : "Caută alte lead-uri"}
-          </Button>
-        ) : null}
       </div>
 
       <MobileViewToggle
@@ -450,15 +460,19 @@ export function DirectorPage({
         layout="split"
         mobilePanel={mobilePanel}
         mapActive={isWideLayout || mobilePanel === "map"}
+        listPrimary={isVenue}
       />
     </aside>
   );
 }
 
-function FilterRow({ children }: { children: ReactNode }) {
+function FilterSection({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar lg:flex-wrap">
-      {children}
+    <div>
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#8a9478]">{label}</p>
+      <div className="flex flex-wrap gap-1 overflow-x-auto pb-0.5 no-scrollbar sm:overflow-visible">
+        {children}
+      </div>
     </div>
   );
 }
@@ -477,7 +491,7 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "shrink-0 rounded-full border px-2.5 py-1 text-xs font-bold transition",
+        "shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-bold transition",
         active
           ? "border-[#4d6638] bg-[#4d6638] text-white"
           : "border-[#ded5bf] bg-white text-[#526047] hover:bg-[#f1eadb]",

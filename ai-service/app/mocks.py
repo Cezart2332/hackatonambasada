@@ -13,15 +13,32 @@ def mock_embedding(seed: str) -> list[float]:
 
 def mock_onboarding_reply(step: str, user_answer: str, profile_hint: str | None) -> str:
     hints = {
-        "product": f"Am notat: {user_answer}. Următorul pas — cantitatea disponibilă pentru livrare.",
-        "quantity": f"Perfect, {user_answer}. Din ce localitate pleci cu marfa?",
-        "location": f"Ok, {user_answer}. Cât de departe poți livra confortabil?",
-        "range": f"Raza de {user_answer} e rezonabilă. În ce zile livrezi cel mai ușor?",
-        "days": f"Excelent — {user_answer}. Caut acum afaceri locale care ar putea cumpăra.",
+        "product": (
+            f"Super — {user_answer} sună bine pentru piața locală. "
+            f"Cât ai disponibil săptămâna asta pentru livrare?"
+        ),
+        "quantity": (
+            f"Notat: {user_answer}. "
+            f"Ca să-ți arăt lead-uri aproape, spune-mi din ce localitate pleci."
+        ),
+        "location": (
+            f"Perfect, {user_answer}. "
+            f"Ultima întrebare despre livrare: cât de departe poți merge fără să te încurce?"
+        ),
+        "range": (
+            f"Raza de {user_answer} e ok. "
+            f"În ce zile îți convine cel mai mult să livrezi?"
+        ),
+        "days": (
+            f"Am tot ce-mi trebuie — livrare {user_answer}. "
+            f"Caut acum restaurante, hoteluri și magazine din zonă care ar putea cumpăra."
+        ),
     }
     if step in hints:
         return hints[step]
-    return f"Am înregistrat „{user_answer}”. Continuăm configurarea profilului."
+    if profile_hint:
+        return f"Am actualizat profilul cu „{user_answer}”. Folosesc și ce ai deja: {profile_hint}."
+    return f"Am notat „{user_answer}”. Mai avem un pas sau două și trecem la lead-uri."
 
 
 def mock_message_draft(
@@ -30,23 +47,36 @@ def mock_message_draft(
     locality: str,
     tone: str = "cald, direct",
 ) -> str:
+    products = product_summary or "produse din zonă"
+    place = locality or "Dobrogea"
+
     return (
         f"Bună ziua,\n\n"
-        f"Sunt producător local din {locality or 'Dobrogea'} și ofer {product_summary or 'produse locale'}. "
-        f"Am văzut că {business_name} pune accent pe ingrediente locale și cred că am avea o potrivire bună.\n\n"
-        f"Pot trimite cantități, prețuri și o mostră dacă vă este util.\n\n"
-        f"Cu respect,\n"
-        f"Producător local"
+        f"Sunt producător din {place} și am {products} disponibile săptămâna asta. "
+        f"Am văzut că la {business_name} folosiți ingrediente locale — "
+        f"ar putea fi o potrivire bună pentru meniul sau oferta voastră.\n\n"
+        f"Dacă vă ajută, vă trimit cantități, prețuri și o mostră mică, fără obligație.\n\n"
+        f"Mulțumesc,\n"
+        f"Un producător local"
     )
 
 
 def mock_lead_enrichment(lead_name: str, lead_type: str, product_summary: str) -> dict:
+    products = product_summary or "produse locale"
+    type_label = lead_type or "afacere locală"
+
     return {
         "leadName": lead_name,
-        "leadType": lead_type,
-        "matchScore": 88,
-        "reason": f"{lead_name} ({lead_type}) pare potrivit pentru {product_summary or 'produse locale'} — mock AI.",
-        "suggestedPitch": f"Propune un lot mic de test către {lead_name}, accent pe proveniență locală.",
-        "bestDay": "Marți dimineața, înainte de aprovizionare.",
-        "tone": "cald, direct, fără presiune",
+        "leadType": type_label,
+        "matchScore": 91,
+        "reason": (
+            f"{lead_name} ({type_label}) cumpără des din zonă și menționează furnizori locali — "
+            f"potrivit pentru {products}."
+        ),
+        "suggestedPitch": (
+            f"Sugerează un lot mic de probă pentru {lead_name}, "
+            f"cu accent pe proveniență din Dobrogea și livrare rapidă."
+        ),
+        "bestDay": "Marți sau miercuri dimineața, înainte de aprovizionare.",
+        "tone": "cald, scurt, fără presiune",
     }

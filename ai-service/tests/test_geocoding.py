@@ -66,6 +66,65 @@ class GeocodingTests(unittest.TestCase):
         self.assertIn("Cosa Ristorante, Strada Unirii 29, Constanța, Romania", queries)
         self.assertIn("Strada Unirii 29, Constanța, Romania", queries)
 
+    def test_mall_and_semicolon_address_gets_clean_geocode_variants(self) -> None:
+        queries = geocode._build_geocode_queries(
+            "Cofetăria Sisters' Bakery",
+            "Zona Food Court- vis-a-vis de Farmacia Tei, Vivo Shopping Center, Constanța; "
+            "B.P. Hasdeu Nr. 103 (intersectie cu Soveja), Constanța",
+            "Constanța",
+        )
+
+        self.assertIn(
+            "Cofetăria Sisters' Bakery, Vivo Shopping Center, Constanța, Romania",
+            queries,
+        )
+        self.assertIn("Vivo Shopping Center, Constanța, Romania", queries)
+        self.assertIn(
+            "Cofetăria Sisters' Bakery, Strada B.P. Hasdeu 103, Constanța, Romania",
+            queries,
+        )
+
+    def test_parenthetical_multi_location_streets_are_kept(self) -> None:
+        queries = geocode._build_geocode_queries(
+            "Patiseria Efe",
+            "Constanța, Medgidia sau Năvodari (locații multiple, adrese specifice pentru promoții: "
+            "Str. Stefan cel Mare, Bd. Tomis, Bd. Al. Lăpușneanu, Str. Liliacului)",
+            "Constanța",
+        )
+
+        self.assertIn("Patiseria Efe, Strada Stefan cel Mare, Constanța, Romania", queries)
+        self.assertIn("Patiseria Efe, Bulevardul Tomis, Constanța, Romania", queries)
+        self.assertIn("Patiseria Efe, Bulevardul Al. Lăpușneanu, Constanța, Romania", queries)
+
+    def test_geocode_business_tries_cleaned_multisite_query(self) -> None:
+        calls: list[str] = []
+
+        def fake_geocode_query(query: str, locality: str | None = None) -> GeocodeResult | None:
+            calls.append(query)
+            if query == "Vivo Shopping Center, Constanța, Romania":
+                return GeocodeResult(
+                    latitude=44.211,
+                    longitude=28.618,
+                    label="VIVO! Constanța, România",
+                    query=query,
+                )
+            return None
+
+        with patch("app.geocode.geocode_query", side_effect=fake_geocode_query):
+            result = geocode.geocode_business(
+                "Cofetăria Sisters' Bakery",
+                "Zona Food Court- vis-a-vis de Farmacia Tei, Vivo Shopping Center, Constanța; "
+                "B.P. Hasdeu Nr. 103, Constanța",
+                "Constanța",
+            )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.query, "Vivo Shopping Center, Constanța, Romania")
+        self.assertNotIn(
+            "Zona Food Court- vis-a-vis de Farmacia Tei, Vivo Shopping Center, Constanța; B.P. Hasdeu 103, Romania",
+            calls,
+        )
+
     def test_wrong_city_result_is_rejected_for_specific_locality(self) -> None:
         result = geocode._pick_romania_result(
             [

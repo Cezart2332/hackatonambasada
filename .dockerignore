@@ -12,6 +12,8 @@ server/dist
 terminals
 ai-service/__pycache__
 **/__pycache__
+*.py[cod]
 **/.pytest_cache
 coverage
 .vscode
+*.tsbuildinfo

@@ -59,17 +59,30 @@ def _extract_avoid_labels(reason: str, buyer_name: str, buyer_type: str) -> list
     if not settings.llm_enabled:
         labels = []
         lower = reason.lower()
-        for keyword in ("hotel", "restaurant", "cafe", "magazin", "preț", "cantitate", "livrare"):
+        cheese_variants = ("capr", "oaie", "vacă", "vaca", "brânz", "branz")
+        if sum(1 for keyword in cheese_variants if keyword in lower) >= 2:
+            labels.append("incompatibilitate sortiment brânză")
+        for keyword in ("preț", "pret", "cantitate", "livrare", "contract exclusiv", "închis", "inchis"):
             if keyword in lower:
                 labels.append(keyword)
-        if buyer_type and buyer_type.lower() not in {l.lower() for l in labels}:
+        if (
+            not labels
+            and buyer_type
+            and buyer_type.lower() not in {l.lower() for l in labels}
+            and any(word in lower for word in ("nu caut", "nu vreau", "evită tipul", "evita tipul"))
+        ):
             labels.append(buyer_type.split()[0][:40])
         return labels[:4] or [reason[:60]]
 
     prompt = (
-        "Extrage 1–3 etichete scurte (tip afacere, motiv respingere) din feedback-ul producătorului.\n"
+        "Extrage 1–3 etichete scurte de evitare din feedback-ul producătorului.\n"
         f"Afacere: {buyer_name} ({buyer_type})\n"
         f"Motiv: {reason}\n\n"
+        "Reguli:\n"
+        "- Etichetele trebuie să fie specifice motivului, nu categorii largi.\n"
+        "- NU returna tipul afacerii (restaurant/hotel/cafe/magazin) decât dacă utilizatorul spune explicit că nu vrea acel tip de afacere.\n"
+        "- Pentru incompatibilități de produs, păstrează varianta exactă: ex. „cere brânză de capră, producătorul vinde brânză de oaie”.\n"
+        "- Pentru preț, cantitate, livrare sau contract existent, eticheta trebuie să reflecte exact problema.\n"
         'Returnează DOAR JSON: {"labels":["...","..."]}'
     )
     try:

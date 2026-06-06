@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from app import db, geocode
 from app.agent import discovery_graph
-from app.gemini import BuyerDraft
+from app.gemini import BuyerDraft, _parse_buyer_item
 from app.geocode import GeocodeResult
 from app.services import discovery
 
@@ -165,9 +165,10 @@ class GeocodingTests(unittest.TestCase):
             "name": "Restaurant Test",
             "type": "restaurant",
             "address": "Strada Testului 10, Constanța, România",
+            "website": "https://restaurant-test.ro",
             "needs": ["vegetables"],
             "summary": "Restaurant local.",
-            "source_urls": ["https://example.com/restaurant-test"],
+            "source_urls": ["https://restaurant-test.ro"],
         }
         state = {
             "locality": "Constanța",
@@ -202,9 +203,10 @@ class GeocodingTests(unittest.TestCase):
             "type": "restaurant",
             "address": "Constanța, România",
             "city": "Constanța",
+            "website": "https://restaurant-local.ro",
             "needs": ["vegetables"],
             "summary": "Restaurant local.",
-            "source_urls": ["https://example.com/restaurant-local"],
+            "source_urls": ["https://restaurant-local.ro"],
         }
         state = {
             "locality": "Constanța",
@@ -237,6 +239,51 @@ class GeocodingTests(unittest.TestCase):
 
         self.assertEqual(len(result["validated"]), 1)
         self.assertEqual(result["validated"][0].geocode_status, "city_center")
+
+    def test_discovery_graph_uses_separate_category_prompts(self) -> None:
+        prompts: list[str] = []
+
+        def fake_chat(prompt: str, use_web_tools: bool = True, json_mode: bool = True):
+            prompts.append(prompt)
+            return SimpleNamespace(text="[]", citations=[])
+
+        state = {
+            "locality": "Dobrogea",
+            "latitude": 44.17,
+            "longitude": 28.63,
+            "range_km": 35.0,
+            "producer_needs": ["vegetables"],
+            "exclude_names": [],
+            "avoid_labels": [],
+            "target_count": 8,
+            "attempts": 0,
+            "research_text": "",
+            "citations": [],
+            "validated": [],
+            "seen_names": [],
+        }
+
+        with patch("app.agent.discovery_graph.chat_with_web", side_effect=fake_chat):
+            first = discovery_graph.search_node(state)
+            second = discovery_graph.search_node({**state, "attempts": first["attempts"]})
+
+        self.assertIn("Categoria acestei runde: RESTAURANTE.", prompts[0])
+        self.assertIn("Include doar: restaurante", prompts[0])
+        self.assertIn("Categoria acestei runde: HOTELURI ȘI PENSIUNI.", prompts[1])
+        self.assertIn("Dovada minimă acceptată", prompts[1])
+
+    def test_discovery_graph_runs_through_all_categories_before_ending(self) -> None:
+        state = {
+            "validated": [],
+            "target_count": 8,
+            "attempts": discovery_graph.MAX_ATTEMPTS - 1,
+        }
+
+        self.assertEqual(discovery_graph.route_after_validate(state), "search")
+        self.assertEqual(
+            discovery_graph.route_after_validate({**state, "attempts": discovery_graph.MAX_ATTEMPTS}),
+            "end",
+        )
 
     def test_verified_geocode_metadata_is_passed_to_upsert(self) -> None:
         draft = BuyerDraft(
@@ -289,6 +336,74 @@ class GeocodingTests(unittest.TestCase):
 
         with patch("app.db.list_buyers_in_area", return_value=old_rows):
             self.assertFalse(db.area_has_geocoded_data("constanta:44.2:28.6", 44.17, 28.63, 35))
+
+    def test_market_is_not_accepted_as_buyer_venue(self) -> None:
+        item = {
+            "name": "Piața Griviței Constanța",
+            "type": "piață agroalimentară",
+            "city": "Constanța",
+            "address": "Constanța, România",
+            "website": "https://example-market.ro",
+            "source_urls": ["https://example-market.ro"],
+            "needs": ["vegetables"],
+        }
+
+        draft = _parse_buyer_item(
+            item,
+            locality="Dobrogea",
+            latitude=44.17,
+            longitude=28.63,
+            fallback_urls=[],
+            research_text="",
+        )
+
+        self.assertIsNone(draft)
+
+    def test_news_article_url_is_not_accepted_as_official_website(self) -> None:
+        item = {
+            "name": "Restaurant Pontica",
+            "type": "restaurant",
+            "city": "Constanța",
+            "address": "Strada Unirii 29, Constanța, România",
+            "website": "https://ziuaconstanta.ro/stiri/restaurant-din-articol.html",
+            "source_urls": ["https://ziuaconstanta.ro/stiri/restaurant-din-articol.html"],
+            "needs": ["vegetables"],
+        }
+
+        draft = _parse_buyer_item(
+            item,
+            locality="Dobrogea",
+            latitude=44.17,
+            longitude=28.63,
+            fallback_urls=[],
+            research_text="",
+        )
+
+        self.assertIsNone(draft)
+
+    def test_official_venue_website_is_accepted(self) -> None:
+        item = {
+            "name": "Restaurant Bueno",
+            "type": "restaurant",
+            "city": "Constanța",
+            "address": "Bulevardul Tomis 55, Constanța, România",
+            "website": "https://www.restaurantbueno.ro/restaurant-bueno-constanta/",
+            "source_urls": ["https://www.restaurantbueno.ro/restaurant-bueno-constanta/"],
+            "needs": ["vegetables", "cheese"],
+            "summary": "Venue activ cu meniu public.",
+        }
+
+        draft = _parse_buyer_item(
+            item,
+            locality="Dobrogea",
+            latitude=44.17,
+            longitude=28.63,
+            fallback_urls=[],
+            research_text="",
+        )
+
+        self.assertIsNotNone(draft)
+        self.assertEqual(draft.website, "https://www.restaurantbueno.ro/restaurant-bueno-constanta/")
 
 
 if __name__ == "__main__":

@@ -42,12 +42,14 @@ def _simulate_outcome(*, lead: dict[str, Any], draft: str, product_summary: str)
         raise RuntimeError("OPEN_ROUTER_KEY not configured")
 
     prompt = (
-        "Ești un simulator pentru outreach B2B local pe lead-uri reale (NU trimite nimic real).\n"
+        "Ești un simulator pragmatic pentru outreach B2B local pe lead-uri reale. NU trimite nimic real.\n"
         f"Lead: {lead.get('name')} ({lead.get('type', '')})\n"
         f"Producător: {product_summary}\n"
         f"Mesaj draft:\n{draft[:800]}\n\n"
         'Returnează DOAR JSON: {"outcome":"...", "reasoning":"..."}\n'
-        "outcome — una din: răspuns probabil | interes moderat | nepotrivit | contact limitat"
+        "outcome — una din: răspuns probabil | interes moderat | nepotrivit | contact limitat\n"
+        "reasoning — maximum 1 propoziție, concretă, fără expresii AI/generice. "
+        "Spune ce semnal real susține verdictul: meniu, tip local, produs sau lipsă contact."
     )
     try:
         model = get_chat_model(json_mode=True, temperature=0.2)

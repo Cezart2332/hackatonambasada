@@ -20,9 +20,11 @@ import {
   mapLeadForPlan,
 } from "./lead.mapper.js";
 import type { CampaignSimulateInput, MatchLeadsInput } from "./lead.schema.js";
+import { searchLocations } from "../geo/geo.service.js";
 
 const DEFAULT_LAT = 44.1699;
 const DEFAULT_LON = 28.6348;
+const geocodedLocalityCache = new Map<string, { latitude: number; longitude: number }>();
 
 async function getProfileContext(userId: string) {
   let profile = await prisma.producerProfile.findUnique({
@@ -40,14 +42,56 @@ async function getProfileContext(userId: string) {
   return profile;
 }
 
+async function resolveProfileCoordinates(
+  profile: Awaited<ReturnType<typeof getProfileContext>>,
+  input: MatchLeadsInput = {},
+) {
+  if (input.latitude != null && input.longitude != null) {
+    return { latitude: input.latitude, longitude: input.longitude };
+  }
+
+  if (profile.latitude != null && profile.longitude != null) {
+    return { latitude: profile.latitude, longitude: profile.longitude };
+  }
+
+  const locality = (profile.locationChoice || profile.location || "").trim();
+  if (locality) {
+    const cacheKey = locality.toLowerCase();
+    const cached = geocodedLocalityCache.get(cacheKey);
+    if (cached) return cached;
+
+    try {
+      const [first] = await searchLocations(`${locality}, Dobrogea, România`);
+      if (first) {
+        const coords = { latitude: first.latitude, longitude: first.longitude };
+        geocodedLocalityCache.set(cacheKey, coords);
+        await prisma.producerProfile
+          .update({
+            where: { id: profile.id },
+            data: {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              locationChoice: profile.locationChoice || first.label,
+            },
+          })
+          .catch(() => undefined);
+        return coords;
+      }
+    } catch {
+      // Keep the request usable if external geocoding is temporarily unavailable.
+    }
+  }
+
+  return { latitude: DEFAULT_LAT, longitude: DEFAULT_LON };
+}
+
 async function discoverAiLeads(
   userId: string,
   input: MatchLeadsInput = {},
   options: { discoverMore?: boolean } = {},
 ) {
   const profile = await getProfileContext(userId);
-  const latitude = input.latitude ?? profile.latitude ?? DEFAULT_LAT;
-  const longitude = input.longitude ?? profile.longitude ?? DEFAULT_LON;
+  const { latitude, longitude } = await resolveProfileCoordinates(profile, input);
   const rangeKm = input.rangeKm ?? profile.rangeKm ?? 35;
   const locality = profile.location || profile.locationChoice || "Dobrogea";
   const products = profile.products.map((p) => p.name);
@@ -118,8 +162,7 @@ export async function matchMoreForUser(
 
 export async function listLeadsForUser(userId: string, accountType?: string) {
   const profile = await getProfileContext(userId);
-  const latitude = profile.latitude ?? DEFAULT_LAT;
-  const longitude = profile.longitude ?? DEFAULT_LON;
+  const { latitude, longitude } = await resolveProfileCoordinates(profile);
   const plan = await getPlanContext(userId, accountType);
 
   const aiListed = await listDiscoveredLeads(userId, latitude, longitude);
@@ -152,10 +195,11 @@ export async function getLeadById(userId: string, leadId: string, accountType?: 
   if (isBuyerLeadId(leadId)) {
     const profile = await getProfileContext(userId);
     const plan = await getPlanContext(userId, accountType);
+    const { latitude, longitude } = await resolveProfileCoordinates(profile);
     const listed = await listDiscoveredLeads(
       userId,
-      profile.latitude ?? DEFAULT_LAT,
-      profile.longitude ?? DEFAULT_LON,
+      latitude,
+      longitude,
     );
     const found = listed?.find((l) => l.id === leadId);
     if (found) {

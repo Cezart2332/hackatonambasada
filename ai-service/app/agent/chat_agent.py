@@ -29,8 +29,9 @@ Reguli:
 - Vorbește română, cald, scurt (2–4 propoziții).
 - Pune câte o întrebare clară dacă lipsește ceva din profil.
 - Nu inventa afaceri — folosește run_discovery.
-- După run_discovery, rezumă pe scurt ce ai găsit.
-- Pentru „caută alte lead-uri” / „mai multe lead-uri”, apelează run_discovery cu discover_more=true.
+- Dacă utilizatorul cere explicit „caută lead-uri”, „găsește clienți”, „caută restaurante/localuri” sau similar, tratează mesajul ca intenție de discovery și apelează run_discovery imediat când profilul are produse + localitate + rază.
+- După run_discovery, rezumă concret numele găsite și menționează că sunt venue-uri reale verificate.
+- Pentru „caută alte lead-uri” / „mai multe lead-uri” / „mai caută”, apelează run_discovery cu discover_more=true.
 """
 
 _checkpointer = MemorySaver()
@@ -81,6 +82,30 @@ def _profile_ready(profile: dict[str, Any]) -> bool:
     has_location = bool(str(profile.get("location", "")).strip())
     has_range = profile.get("rangeKm") is not None or bool(str(profile.get("range", "")).strip())
     return has_product and has_location and has_range
+
+
+def _looks_like_discovery_request(message: str) -> bool:
+    lower = message.lower()
+    intent_terms = (
+        "caut",
+        "gaseste",
+        "găsește",
+        "vreau lead",
+        "lead-uri",
+        "leads",
+        "clienti",
+        "clienți",
+        "restaurante",
+        "localuri",
+        "cumparatori",
+        "cumpărători",
+    )
+    return any(term in lower for term in intent_terms)
+
+
+def _looks_like_more_discovery(message: str) -> bool:
+    lower = message.lower()
+    return any(term in lower for term in ("mai multe", "alte lead", "mai caut", "cauta altele", "caută altele"))
 
 
 @tool
@@ -135,6 +160,10 @@ def run_discovery(discover_more: bool = False) -> str:
 
     discover_more: true pentru lead-uri noi, excluzând cele deja afișate.
     """
+    return _run_discovery_from_context(discover_more=discover_more)
+
+
+def _run_discovery_from_context(discover_more: bool = False) -> str:
     ctx = _ctx()
     profile = ctx.profile
 
@@ -289,6 +318,18 @@ def run_chat_turn(
         user_content = message
         if profile_hint.strip("=,"):
             user_content = f"{message}\n\n[Profil curent: {profile_hint}]"
+
+        if _looks_like_discovery_request(message) and _profile_ready(ctx.profile):
+            discovery_reply = _run_discovery_from_context(
+                discover_more=_looks_like_more_discovery(message)
+            )
+            return ChatTurnResult(
+                reply=discovery_reply,
+                profile_updates=dict(ctx.profile_updates),
+                leads=list(ctx.leads),
+                onboarding_complete=ctx.onboarding_complete,
+                model=settings.openrouter_model,
+            )
 
         config = {"configurable": {"thread_id": user_id}}
         result = _invoke_agent(agent, user_content, config)

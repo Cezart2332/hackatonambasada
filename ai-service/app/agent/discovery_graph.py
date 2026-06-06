@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -12,7 +13,9 @@ from app.gemini import (
     _extract_json_array,
     _fetch_menu_from_website,
     _filter_public_urls,
+    _looks_like_official_venue_url,
     _parse_buyer_item,
+    CURRENT_DATE_CONTEXT,
 )
 from app.geocode import geocode_business, geocode_city_center, haversine_km, infer_city_from_address
 from app.openrouter_client import chat_with_web
@@ -21,14 +24,41 @@ from app.taxonomy import needs_to_text
 
 logger = logging.getLogger(__name__)
 
-SEARCH_ANGLES = [
-    "restaurante, hoteluri și pensiuni",
-    "magazine alimentare, supermarketuri și băcănii",
-    "cafenele, patiserii și cofetării",
-    "catering, cantine și unități HoReCa",
+class SearchCategory(TypedDict):
+    label: str
+    accepted: str
+    rejected: str
+    evidence: str
+
+
+SEARCH_CATEGORIES: list[SearchCategory] = [
+    {
+        "label": "RESTAURANTE",
+        "accepted": "restaurante, bistrouri, trattorii, taverne, steakhouse-uri, restaurante de hotel cu pagină proprie",
+        "rejected": "hoteluri fără restaurant public, piețe agroalimentare, listări de top restaurante, articole de presă",
+        "evidence": "site oficial cu meniu, pagină oficială social media cu adresă, sau pagină oficială de restaurant",
+    },
+    {
+        "label": "HOTELURI ȘI PENSIUNI",
+        "accepted": "hoteluri, pensiuni, boutique hotels, vile turistice și unități de cazare care au restaurant, mic dejun sau evenimente",
+        "rejected": "pagini Booking/Tripadvisor fără site oficial, apartamente simple fără bucătărie/restaurant, ghiduri turistice",
+        "evidence": "site oficial al hotelului/pensiunii sau pagină oficială social media cu adresă și servicii alimentare",
+    },
+    {
+        "label": "CAFENELE, COFETĂRII ȘI PATISERII",
+        "accepted": "cafenele, coffee shop-uri, cofetării, patiserii, brutării artizanale, gelaterii cu locație fizică",
+        "rejected": "rețete, articole despre deserturi, lanțuri fără adresă locală verificabilă, evenimente temporare",
+        "evidence": "site oficial sau pagină oficială social media cu produse, adresă și program",
+    },
+    {
+        "label": "MAGAZINE ALIMENTARE",
+        "accepted": "magazine alimentare, băcănii, delicaterii, magazine gourmet, magazine bio, carmangerii, supermarketuri locale",
+        "rejected": "piețe publice, târguri, hale agroalimentare, anunțuri, agregatoare și directoare comerciale",
+        "evidence": "site oficial sau pagină oficială social media pentru magazinul respectiv, cu adresă publică",
+    },
 ]
 
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = len(SEARCH_CATEGORIES)
 
 
 def _address_needs_enrichment(address: str, locality: str) -> bool:
@@ -85,7 +115,7 @@ def _name_blocked(name: str, exclude_names: list[str], seen: set[str]) -> bool:
 
 def search_node(state: DiscoveryState) -> dict:
     attempts = state["attempts"] + 1
-    angle = SEARCH_ANGLES[(attempts - 1) % len(SEARCH_ANGLES)]
+    category = SEARCH_CATEGORIES[(attempts - 1) % len(SEARCH_CATEGORIES)]
     needs_label = needs_to_text(state["producer_needs"])
     exclude = state["exclude_names"]
     exclude_block = (
@@ -100,17 +130,29 @@ def search_node(state: DiscoveryState) -> dict:
         else "(niciuna)"
     )
 
+    remaining = max(1, state["target_count"] - len(state.get("validated") or []))
+    remaining_categories = max(1, MAX_ATTEMPTS - attempts + 1)
+    category_limit = max(3, min(8, math.ceil(remaining / remaining_categories) + 1))
+
     prompt = (
         f"Caută pe internet afaceri REALE din {state['locality']}, Dobrogea, România "
         f"(rază ~{state['range_km']:.0f} km, coordonate {state['latitude']:.3f}, {state['longitude']:.3f}).\n"
-        f"Focus pentru această căutare: {angle}.\n"
+        f"Context temporal obligatoriu: azi este {CURRENT_DATE_CONTEXT}; găsește doar venue-uri active/deschise în 2026.\n"
+        f"Categoria acestei runde: {category['label']}.\n"
+        f"Include doar: {category['accepted']}.\n"
+        f"Exclude pentru această rundă: {category['rejected']}.\n"
+        f"Dovada minimă acceptată: {category['evidence']}.\n"
         f"Producătorul vinde: {needs_label}.\n\n"
         f"NU include aceste afaceri deja găsite:\n{exclude_block}\n\n"
         f"EVITĂ tipuri/motive respinse anterior de producător:\n{avoid_block}\n\n"
-        "Folosește web search și web fetch. Pentru fiecare: nume exact, adresă completă, "
-        "site, telefon public, meniu, nevoi agricole estimate.\n\n"
+        f"Include DOAR venue-uri cumpărătoare reale din categoria {category['label']}.\n"
+        "EXCLUDE complet piețe/târguri/hale publice, articole de presă, ghiduri turistice, directoare/listări, "
+        "Google Maps-only, pagini de eveniment sau mențiuni fără site oficial.\n"
+        "Folosește web search și web fetch. Pentru fiecare: nume exact, oraș/localitate exactă, adresă completă, "
+        "site OFICIAL sau pagină oficială Facebook/Instagram, telefon public, meniu, nevoi agricole estimate.\n"
+        "Dacă nu găsești site/pagină oficială pentru venue, NU îl include.\n\n"
         f"{JSON_SCHEMA_HINT}\n"
-        f"Returnează DOAR un JSON array valid cu până la {state['target_count']} afaceri noi.\n"
+        f"Returnează DOAR un JSON array valid cu până la {category_limit} afaceri noi din această categorie.\n"
         "NU inventa. NU include lat/lon."
     )
 
@@ -151,6 +193,9 @@ def extract_validate_node(state: DiscoveryState) -> dict:
 
         if _address_needs_enrichment(draft.address, state["locality"]):
             _enrich_buyer_details(draft, state["locality"])
+        if not draft.website or not _looks_like_official_venue_url(draft.website):
+            logger.warning("Graph skip %s — missing official venue website", draft.name)
+            continue
 
         city = draft.city or infer_city_from_address(draft.address) or state["locality"]
         geo = geocode_business(

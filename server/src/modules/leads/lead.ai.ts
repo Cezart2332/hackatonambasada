@@ -137,10 +137,19 @@ export type SimulatedStep = {
   simulatedOutcome: string;
   simulatedAction: string;
   reasoning: string;
+  deliveries?: Array<{
+    channel: string;
+    target: string;
+    status: string;
+    detail?: string;
+    providerId?: string;
+  }>;
 };
 
 export async function simulateCampaign(params: {
   userId: string;
+  senderEmail?: string;
+  senderPhone?: string;
   leads: Array<{
     id: string;
     name: string;
@@ -168,6 +177,8 @@ export async function simulateCampaign(params: {
       productSummary: params.productSummary,
       locality: params.locality,
       maxLeads: params.maxLeads ?? 5,
+      senderEmail: params.senderEmail ?? "",
+      senderPhone: params.senderPhone ?? "",
     },
     300_000,
   );

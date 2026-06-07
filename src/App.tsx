@@ -1932,6 +1932,7 @@ function App() {
         loading={campaignSimLoading}
         disclaimer={campaignSimDisclaimer}
         steps={campaignSimSteps}
+        leads={leads}
         onClose={() => setCampaignSimOpen(false)}
       />
 
@@ -2713,6 +2714,35 @@ function ContactMessageDialog({
             <MessageCircle className="h-4 w-4" />
             Trimite pe WhatsApp
           </Button>
+          {lead.contact && lead.contact.includes("@") && (
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center justify-center gap-1.5"
+              onClick={() => {
+                const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+                  lead.contact,
+                )}&su=${encodeURIComponent("Ofertă produse locale")}&body=${encodeURIComponent(draft || lead.contact)}`;
+                window.open(gmailUrl, "_blank");
+              }}
+            >
+              <Mail className="h-4 w-4" />
+              Trimite pe Gmail
+            </Button>
+          )}
+          {lead.contact && lead.contact.includes("@") && (
+            <Button
+              variant="outline"
+              className="border-[#eadfca] text-[#2b3725] hover:bg-[#fff9eb] font-semibold flex items-center justify-center gap-1.5"
+              onClick={() => {
+                const mailtoUrl = `mailto:${encodeURIComponent(
+                  lead.contact,
+                )}?subject=${encodeURIComponent("Ofertă produse locale")}&body=${encodeURIComponent(draft || lead.contact)}`;
+                window.open(mailtoUrl, "_blank");
+              }}
+            >
+              <Mail className="h-4 w-4" />
+              Trimite prin Email
+            </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

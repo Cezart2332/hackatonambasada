@@ -34,6 +34,7 @@ _COUNTRY_SUFFIXES = re.compile(
     re.IGNORECASE,
 )
 _POSTCODE = re.compile(r"\b\d{5,6}\b")
+_COUNTY_PREFIX = re.compile(r"\b(jude[țt]ul|jude[țt]|jud)\.?\s+", re.IGNORECASE)
 _STREET_ABBREVIATIONS = re.compile(r"\b(str|bd|b-dul|blvd)\.?\s+", re.IGNORECASE)
 _STREET_PREFIXES = re.compile(
     r"^(strada|str\.|bulevardul|bd\.|b-dul|blvd|aleea|șoseaua|soseaua|piața|piata)\b",
@@ -92,6 +93,7 @@ def _clean_locality(locality: str) -> str:
     if not text:
         return ""
     text = _COUNTRY_SUFFIXES.sub("", text).strip(" ,")
+    text = _COUNTY_PREFIX.sub("", text).strip(" ,")
     if _fold(text) in _BROAD_LOCALITIES:
         return ""
     return text
@@ -248,6 +250,7 @@ def _normalize_address(address: str, locality: str) -> str:
 
     text = _COUNTRY_SUFFIXES.sub("", text).strip(" ,")
     text = _POSTCODE.sub("", text).strip(" ,")
+    text = _COUNTY_PREFIX.sub("", text).strip(" ,")
     loc = _clean_locality(locality)
     if loc:
         loc_parts = [part.strip() for part in loc.split(",") if part.strip()]
@@ -259,6 +262,7 @@ def _normalize_address(address: str, locality: str) -> str:
         text = pattern.sub("", text).strip(" ,")
         text = _COUNTRY_SUFFIXES.sub("", text).strip(" ,")
         text = _POSTCODE.sub("", text).strip(" ,")
+        text = _COUNTY_PREFIX.sub("", text).strip(" ,")
     return text
 
 

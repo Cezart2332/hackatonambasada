@@ -101,7 +101,7 @@ async function discoverAiLeads(
   const rangeKm = input.rangeKm ?? profile.rangeKm ?? 35;
   const locality = profile.location || profile.locationChoice || "Dobrogea";
   const products = profile.products.map((p) => p.name);
-  const limit = input.limit ?? 3;
+  const limit = Math.min(input.limit ?? 3, 3);
 
   const discovered = await discoverLeads({
     userId,
@@ -295,6 +295,7 @@ export async function simulateCampaignForUser(
 
   await assertCanSimulate(userId, accountType);
 
+  const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
   const profile = await getProfileContext(userId);
   const allLeads = await listLeadsForUser(userId, accountType);
   const maxLeads = input.maxLeads ?? 5;
@@ -315,6 +316,8 @@ export async function simulateCampaignForUser(
 
   const result = await simulateCampaign({
     userId,
+    senderEmail: user.email,
+    senderPhone: profile.phone,
     leads: selected.map((lead) => {
       const enriched = lead as typeof lead & {
         website?: string;

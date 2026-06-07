@@ -202,4 +202,21 @@ export type SimulatedCampaignStep = {
   simulatedOutcome: string;
   simulatedAction: string;
   reasoning: string;
+  deliveries?: Array<{
+    channel: string;
+    target: string;
+    status: string;
+    detail?: string;
+    providerId?: string;
+  }>;
+};
+
+export type UnipileIntegrationChannelStatus = {
+  status: string;
+  connected: boolean;
+};
+
+export type UnipileIntegrationsStatus = {
+  whatsapp: UnipileIntegrationChannelStatus;
+  gmail: UnipileIntegrationChannelStatus;
 };

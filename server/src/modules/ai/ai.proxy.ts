@@ -91,6 +91,35 @@ aiProxyRouter.post("/v1/chat/reply", requireSession, async (req, res, next) => {
   }
 });
 
+aiProxyRouter.post("/lead-outreach", requireSession, async (req, res, next) => {
+  try {
+    const target = new URL(`${AI_SERVICE_URL}/v1/lead-outreach`);
+    const headers = forwardHeaders(req.headers);
+    headers.set("content-type", "application/json");
+
+    const body = {
+      ...(req.body && typeof req.body === "object" ? req.body : {}),
+      userId: req.user!.id,
+    };
+
+    const upstream = await fetch(target, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    const text = await upstream.text();
+    res.status(upstream.status);
+    upstream.headers.forEach((value, key) => {
+      if (key === "transfer-encoding") return;
+      res.setHeader(key, value);
+    });
+    res.send(text);
+  } catch (error) {
+    next(error);
+  }
+});
+
 aiProxyRouter.all("/*path", async (req, res, next) => {
   try {
     const path = req.params.path;

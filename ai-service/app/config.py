@@ -34,6 +34,38 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("GEOCODE_USE_NOMINATIM"),
     )
+    unipile_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("UNIPILE_API_KEY"),
+    )
+    unipile_base_url: str = Field(
+        default="https://api.unipile.com/v2",
+        validation_alias=AliasChoices("UNIPILE_BASE_URL"),
+    )
+    unipile_whatsapp_account_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("UNIPILE_WHATSAPP_ACCOUNT_ID"),
+    )
+    unipile_email_account_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("UNIPILE_EMAIL_ACCOUNT_ID", "UNIPILE_GMAIL_ACCOUNT_ID"),
+    )
+    unipile_enable_sends: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("UNIPILE_ENABLE_SENDS"),
+    )
+    app_url: str = Field(
+        default="http://backend:3001",
+        validation_alias=AliasChoices("APP_URL"),
+    )
+    internal_api_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INTERNAL_API_TOKEN"),
+    )
+    unipile_webhook_secret: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("UNIPILE_WEBHOOK_SECRET"),
+    )
 
     @property
     def psycopg_database_url(self) -> str:
@@ -47,6 +79,10 @@ class Settings(BaseSettings):
     def gemini_enabled(self) -> bool:
         """Backward-compatible alias used across the codebase."""
         return self.llm_enabled
+
+    @property
+    def unipile_enabled(self) -> bool:
+        return bool(self.unipile_api_key and self.unipile_api_key.strip() and self.unipile_enable_sends)
 
 
 @lru_cache

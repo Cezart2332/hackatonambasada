@@ -159,6 +159,47 @@ export function defaultProductFieldsForCategory(categoryId: ProductCategoryId) {
   };
 }
 
+export function inferCategoryFromName(name: string): ProductCategoryId {
+  const lower = name.toLowerCase().trim();
+  
+  if (
+    /miere|polen|propolis|fagure|ceara|ceară|stupina|stupină|stupine|albin/i.test(
+      lower
+    )
+  ) {
+    return "miere_gemuri";
+  }
+  if (
+    /branz|brânz|lactat|lapte|iaurt|smantan|smântân|unt|cașcaval|cascaval|urdă|urda|capră|capra|oaie|oie|vacă|vaca|caș|cas/i.test(
+      lower
+    )
+  ) {
+    return "lactate_branzeturi";
+  }
+  if (
+    /carne|mezel|pui|porc|vită|vita|miel|curcan|cârnaț|carnat|salam|șunc|sunc|pastram|ceaf|organ|mici|carnaț/i.test(
+      lower
+    )
+  ) {
+    return "carnuri_mezeluri";
+  }
+  if (/vin|bere|suc|must|băutur|bautur|palinc|țuic|tuic|lichior|cidru/i.test(lower)) {
+    return "vinuri_bauturi";
+  }
+  if (/peșt|pest|icre|scrumb|păstr|pastr|crap|somon|fructe de mare/i.test(lower)) {
+    return "peste_bacanie";
+  }
+  if (
+    /legum|fruct|mere|pere|roși|rosi|castravet|cartof|ceap|usturoi|salat|ardei|cireș|caise|piersic|strugur|prun|cireş|verdeaț|verdeat|mărar|marar|pătrunjel|patrunjel/i.test(
+      lower
+    )
+  ) {
+    return "legume_fructe";
+  }
+  
+  return "altele";
+}
+
 export function normalizeLegacyProduct(product: {
   name: string;
   category?: string;
@@ -166,21 +207,18 @@ export function normalizeLegacyProduct(product: {
   packaging?: string;
   unit?: string;
 }): { category: ProductCategoryId; baseUnit: BaseUnitId; packaging: string; unit: string } {
-  if (product.category && getCategoryConfig(product.category)) {
-    const categoryId = product.category as ProductCategoryId;
-    const packaging = product.packaging || getCategoryConfig(categoryId)?.packagings[0]?.id || "";
-    const baseUnit = (product.baseUnit as BaseUnitId) || getCategoryConfig(categoryId)?.defaultBaseUnit || "kg";
-    return {
-      category: categoryId,
-      baseUnit,
-      packaging,
-      unit: product.unit || composeProductUnit(categoryId, baseUnit, packaging),
-    };
+  let categoryId = product.category as ProductCategoryId;
+  
+  if (!categoryId || !getCategoryConfig(categoryId)) {
+    categoryId = inferCategoryFromName(product.name);
   }
 
-  const defaults = defaultProductFieldsForCategory("legume_fructe");
+  const packaging = product.packaging || getCategoryConfig(categoryId)?.packagings[0]?.id || "";
+  const baseUnit = (product.baseUnit as BaseUnitId) || getCategoryConfig(categoryId)?.defaultBaseUnit || "kg";
   return {
-    ...defaults,
-    unit: product.unit?.trim() || defaults.unit,
+    category: categoryId,
+    baseUnit,
+    packaging,
+    unit: product.unit || composeProductUnit(categoryId, baseUnit, packaging),
   };
 }

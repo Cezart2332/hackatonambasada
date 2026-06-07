@@ -272,6 +272,7 @@ export async function downgradeToFree(userId: string) {
 
 export function discoveryLimitForPlan(ctx: PlanContext): number {
   if (ctx.tier === "pro") {
+    return Math.min(remainingActive, 3);
     return PRO_DISCOVERY_BATCH_SIZE;
   }
   const remainingActive = Math.max(0, ctx.limits.activeLeads - ctx.usage.activeLeads);

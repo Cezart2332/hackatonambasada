@@ -15,6 +15,7 @@ import {
   integrationsRouter,
   webhookRouter,
 } from "./modules/unipile/unipile.routes.js";
+import { messagesRouter } from "./modules/messages/messages.routes.js";
 
 export function createApp() {
   const app = express();
@@ -50,6 +51,7 @@ export function createApp() {
   app.use("/api/geo", geoRouter);
   app.use("/api/ai", aiProxyRouter);
   app.use("/api/integrations/unipile", integrationsRouter);
+  app.use("/api/messages", messagesRouter);
 
   app.use(errorHandler);
 

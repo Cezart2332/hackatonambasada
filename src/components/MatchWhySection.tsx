@@ -30,6 +30,11 @@ export function MatchWhySection({ lead, isVenue = false }: { lead: Lead; isVenue
               <p>
                 <span className="font-bold text-[#33412c]">Scor produse:</span> +{factors.productScore}
               </p>
+              {factors.historyScore ? (
+                <p>
+                  <span className="font-bold text-[#33412c]">Bonus istoric:</span> +{factors.historyScore}
+                </p>
+              ) : null}
               <p>
                 <span className="font-bold text-[#33412c]">Distanță:</span> {Math.round(factors.distanceKm)} km
                 {factors.producerRangeKm ? ` (livrează până la ${Math.round(factors.producerRangeKm)} km)` : ""}

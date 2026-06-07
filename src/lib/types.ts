@@ -86,12 +86,14 @@ export type Lead = {
   matchedNeeds?: string[];
   matchFactors?: {
     productScore: number;
+    historyScore?: number;
     distanceKm: number;
     producerRangeKm: number;
     inRange: boolean;
     proximityBonus: number;
   };
   verified?: boolean;
+  platformRegistered?: boolean;
   website?: string;
   sourceUrls?: string[];
   phone?: string;
@@ -141,7 +143,7 @@ export type LeadStats = {
     discoveredThisWeek: number;
     weeklyLimit: number | null;
     activeLeads: number;
-    activeLimit: number;
+    activeLimit: number | null;
   };
   matchQuality: {
     averageMatch: number;
@@ -167,7 +169,31 @@ export type ChatMessage =
     };
 
 export type AppScreen = "auth" | "producer-onboarding" | "pending-approval" | "chat";
-export type DashboardView = "chat" | "director" | "profile";
+export type DashboardView = "chat" | "director" | "messages" | "profile";
+
+export type ConversationLastMessage = {
+  body: string;
+  createdAt: string;
+  senderUserId: string;
+};
+
+export type ConversationSummary = {
+  id: string;
+  counterpartUserId: string;
+  counterpartName: string;
+  counterpartBusinessName: string;
+  lastMessage: ConversationLastMessage | null;
+  unreadCount: number;
+  updatedAt: string;
+};
+
+export type DirectMessage = {
+  id: string;
+  senderUserId: string;
+  body: string;
+  createdAt: string;
+  isMine: boolean;
+};
 
 export type SimulatedCampaignStep = {
   leadId: string;

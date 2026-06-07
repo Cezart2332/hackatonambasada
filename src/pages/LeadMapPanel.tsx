@@ -22,10 +22,11 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { MatchWhySection } from "@/components/MatchWhySection";
+import { PlatformRegisteredBadge } from "@/components/PlatformRegisteredBadge";
 import { ProducerOfferList } from "@/components/ProducerOfferList";
 import type { Lead, LeadStatus } from "@/lib/types";
 
-const feedbackOptions: LeadStatus[] = ["Bun", "Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
+const feedbackOptions: LeadStatus[] = ["Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
 
 const LeafletMapContainer = MapContainer as unknown as ComponentType<Record<string, unknown>>;
 const LeafletCircleMarker = CircleMarker as unknown as ComponentType<Record<string, unknown>>;
@@ -163,6 +164,7 @@ export function MapLeadRow({
   lead,
   status,
   failedFeedback,
+  isNewLead = false,
   onDetails,
   onMessage,
   onStatus,
@@ -173,6 +175,7 @@ export function MapLeadRow({
   lead: Lead;
   status?: LeadStatus;
   failedFeedback?: string;
+  isNewLead?: boolean;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
@@ -199,6 +202,12 @@ export function MapLeadRow({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-1">
                 <p className="truncate text-sm font-extrabold text-[#263421]">{lead.name}</p>
+                {!isVenue && isNewLead ? (
+                  <Badge variant="warm" className="shrink-0 text-[10px]">Lead nou</Badge>
+                ) : null}
+                {!isVenue && lead.platformRegistered ? (
+                  <PlatformRegisteredBadge />
+                ) : null}
                 {lead.verified ? <Badge variant="olive" className="shrink-0 text-xs">Verificat</Badge> : null}
                 {isVenue && lead.matchFactors ? (
                   lead.matchFactors.inRange ? (
@@ -255,7 +264,7 @@ export function MapLeadRow({
             </p>
           )}
 
-          {!expanded && (status || failedFeedback) ? (
+          {(status || failedFeedback) ? (
             <div className="mt-1.5 flex flex-wrap items-center gap-1">
               {status ? <StatusBadge status={status} /> : null}
               {failedFeedback ? (
@@ -267,6 +276,21 @@ export function MapLeadRow({
             </div>
           ) : null}
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1 border-t border-[#ebe4d4] px-2.5 py-2">
+        {feedbackOptions.map((option) => (
+          <Button
+            key={option}
+            type="button"
+            size="sm"
+            variant={status === option ? "default" : "chip"}
+            className="h-7 px-2 text-[10px]"
+            onClick={() => onStatus(lead, option)}
+          >
+            {option}
+          </Button>
+        ))}
       </div>
 
       {expanded ? (
@@ -285,8 +309,6 @@ export function MapLeadRow({
           ) : null}
 
           {isVenue ? <MatchWhySection lead={lead} isVenue /> : null}
-
-          {status ? <StatusBadge status={status} /> : null}
 
           <div className="grid grid-cols-2 gap-1.5">
             <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => onDetails(lead)}>
@@ -314,21 +336,6 @@ export function MapLeadRow({
               Ceva n-a mers
             </Button>
           </div>
-
-          <div className="flex flex-wrap gap-1">
-            {feedbackOptions.map((option) => (
-              <Button
-                key={option}
-                type="button"
-                size="sm"
-                variant={status === option ? "default" : "chip"}
-                className="h-7 px-2 text-[11px]"
-                onClick={() => onStatus(lead, option)}
-              >
-                {option}
-              </Button>
-            ))}
-          </div>
         </div>
       ) : null}
     </div>
@@ -339,6 +346,7 @@ function LeadsList({
   leads,
   statuses,
   failedFeedbacks,
+  newLeadIds,
   onDetails,
   onMessage,
   onStatus,
@@ -349,6 +357,7 @@ function LeadsList({
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
   failedFeedbacks: Record<string, string>;
+  newLeadIds?: Set<string>;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
@@ -370,6 +379,7 @@ function LeadsList({
             lead={lead}
             status={statuses[lead.id]}
             failedFeedback={failedFeedbacks[lead.id]}
+            isNewLead={!isVenue && Boolean(newLeadIds?.has(lead.id))}
             onDetails={onDetails}
             onMessage={onMessage}
             onStatus={onStatus}
@@ -387,6 +397,7 @@ export function LeadMapPanel({
   leads,
   statuses,
   failedFeedbacks = {},
+  newLeadIds,
   activeLeadCount,
   searchingMore = false,
   onSearchMore,
@@ -405,6 +416,7 @@ export function LeadMapPanel({
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
   failedFeedbacks?: Record<string, string>;
+  newLeadIds?: Set<string>;
   activeLeadCount: number;
   searchingMore?: boolean;
   onSearchMore?: () => void;
@@ -425,6 +437,7 @@ export function LeadMapPanel({
       leads={leads}
       statuses={statuses}
       failedFeedbacks={failedFeedbacks}
+      newLeadIds={newLeadIds}
       onDetails={onDetails}
       onMessage={onMessage}
       onStatus={onStatus}

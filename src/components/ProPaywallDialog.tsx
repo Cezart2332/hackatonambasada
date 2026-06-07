@@ -29,8 +29,8 @@ export function ProPaywallDialog({
           <DialogDescription>{message}</DialogDescription>
         </DialogHeader>
         <ul className="space-y-1.5 text-sm text-[#34422d]">
-          <li>• Până la 15 lead-uri active</li>
-          <li>• Caută alte lead-uri până umpli lista</li>
+          <li>• Lead-uri nelimitate — câte 10 per căutare</li>
+          <li>• Caută alte lead-uri oricând vrei</li>
           <li>• Statistici pipeline în Director</li>
           <li>• Detalii bogate și simulări nelimitate</li>
         </ul>

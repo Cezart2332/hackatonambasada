@@ -4,7 +4,7 @@ export const matchLeadsSchema = z.object({
   latitude: z.coerce.number().optional(),
   longitude: z.coerce.number().optional(),
   rangeKm: z.coerce.number().positive().optional(),
-  limit: z.coerce.number().int().min(1).max(12).optional(),
+  limit: z.coerce.number().int().min(1).max(10).optional(),
   forceRefresh: z.coerce.boolean().optional(),
 });
 

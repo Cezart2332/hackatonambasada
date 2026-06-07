@@ -12,4 +12,11 @@ export const updateVenueProfileSchema = z.object({
   longitude: z.number().optional().nullable(),
 });
 
+export const updateVenueSearchIntentSchema = z.object({
+  productsNeeded: z.string().max(500).default(""),
+  supplyFrequency: z.string().max(200).default(""),
+  preferredDays: z.string().max(200).default(""),
+});
+
 export type UpdateVenueProfileInput = z.infer<typeof updateVenueProfileSchema>;
+export type UpdateVenueSearchIntentInput = z.infer<typeof updateVenueSearchIntentSchema>;

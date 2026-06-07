@@ -28,6 +28,7 @@ export function mapProducerMatchToDto(producer: MatchedProducer) {
     matchedNeeds: producer.matchedNeeds,
     matchFactors: producer.matchFactors,
     verified: producer.verified,
+    platformRegistered: true,
     website: "",
     sourceUrls: [],
   };

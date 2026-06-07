@@ -328,15 +328,20 @@ export function AuthScreen({
 
   const isProducerRegister = registerAccountType === "producer";
 
+  const heroSubtitle =
+    authMode === "login"
+      ? "Producători și localuri HoReCa din Dobrogea — potriviri clare, contact direct, fără marketplace complicat."
+      : isProducerRegister
+        ? "Îți completezi profilul o dată → Asistentul îți găsește localuri potrivite în Dobrogea → contact direct și mesaje, fără marketplace complicat."
+        : "Spui ce cauți în Asistent → te legăm de producători verificați din Dobrogea → contact direct și mesaje în platformă, fără marketplace complicat.";
+
   return (
     <main className="flex min-h-[100dvh] items-center justify-center bg-[#eef2e7] p-4 text-foreground">
       <div className="w-full max-w-5xl">
         <div className="mx-auto mb-5 flex max-w-xl flex-col items-center text-center">
           <AgentAvatar />
           <p className="mt-3 text-3xl font-extrabold text-[#263421]">Warm Leads</p>
-          <p className="mt-2 text-sm leading-relaxed text-[#62705a]">
-            Spui ce cauți în chat → te legăm doar de producători verificați din Dobrogea → contact direct, fără marketplace complicat.
-          </p>
+          <p className="mt-2 text-sm leading-relaxed text-[#62705a]">{heroSubtitle}</p>
         </div>
 
         <div className="flex justify-center">
@@ -355,7 +360,7 @@ export function AuthScreen({
                     ? "Bine ai revenit — continuă cu recomandările și mesajele tale."
                     : isProducerRegister
                       ? "Înregistrare pentru fermieri și producători locali."
-                      : "Pentru restaurante și hoteluri — nevoile le declari în chat după înregistrare."}
+                      : "Pentru restaurante și hoteluri — nevoile le declari în Asistent după înregistrare."}
                 </CardDescription>
               </div>
             </CardHeader>
@@ -391,11 +396,11 @@ export function AuthScreen({
                       <div className="mt-2.5 flex flex-wrap gap-2">
                         <Badge variant="olive" className="gap-1">
                           <Leaf className="h-3 w-3" />
-                          Producător local
+                          Producător
                         </Badge>
                         <Badge variant="blue" className="gap-1">
                           <Store className="h-3 w-3" />
-                          Restaurant / HoReCa
+                          HoReCa
                         </Badge>
                       </div>
                     </div>
@@ -815,7 +820,7 @@ export function AuthScreen({
                         </section>
 
                         <p className="rounded-2xl border border-[#c8d9aa] bg-[#f0f5e8] px-4 py-3 text-sm text-[#405235]">
-                          După înregistrare, spui în Chat ce produse cauți — acolo actualizezi nevoile și vezi producătorii potriviți.
+                          După înregistrare, spui în Asistent ce produse cauți — acolo actualizezi nevoile și vezi producătorii potriviți.
                         </p>
                       </>
                     ) : null}

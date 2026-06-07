@@ -57,7 +57,7 @@ export function VenueProfilePage({
             </Badge>
             <h1 className="text-2xl font-extrabold text-[#263421]">Profilul localului</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Actualizează datele de contact și locația. Ce produse cauți le spui în Chat.
+              Actualizează datele de contact și locația. Ce produse cauți le spui în Asistent.
             </p>
           </div>
           <Badge variant="warm">{activeMatchCount} producători potriviți</Badge>
@@ -115,7 +115,7 @@ export function VenueProfilePage({
         </div>
 
         <div className="rounded-2xl border border-[#c8d9aa] bg-[#f0f5e8] p-4">
-          <p className="text-sm font-bold text-[#263421]">Cerere curentă (din Chat)</p>
+          <p className="text-sm font-bold text-[#263421]">Cerere curentă (din Asistent)</p>
           {hasSessionNeeds ? (
             <dl className="mt-3 space-y-2 text-sm">
               {sessionNeeds?.trim() ? (
@@ -139,7 +139,7 @@ export function VenueProfilePage({
             </dl>
           ) : (
             <p className="mt-2 text-sm text-[#5a654f]">
-              Nu ai o cerere activă în sesiune. Spune în Chat ce produse cauți și recomandările se actualizează.
+              Nu ai o cerere activă în sesiune. Spune în Asistent ce produse cauți și recomandările se actualizează.
             </p>
           )}
         </div>

@@ -120,10 +120,10 @@ function AccountDetails({ registration }: { registration: AdminRegistration }) {
             Tip: {venueTypeLabels[registration.venue.venueType] || registration.venue.venueType}
           </p>
           <p className="mt-2 text-[#526047]">
-            Nevoi declarate în chat (sesiune, nepersistate în profil).
+            Nevoi declarate în Asistent (sesiune, nepersistate în profil).
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Produsele, cantitatea și zilele de livrare se colectează în Chat.
+            Produsele, cantitatea și zilele de livrare se colectează în Asistent.
           </p>
         </div>
       ) : null}

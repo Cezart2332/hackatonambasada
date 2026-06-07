@@ -7,7 +7,7 @@ const TIMEZONE = "Europe/Bucharest";
 export const FREE_WEEKLY_DISCOVERIES = 3;
 export const FREE_ACTIVE_LEADS = 3;
 export const FREE_WEEKLY_SIMULATIONS = 1;
-export const PRO_ACTIVE_LEADS = 15;
+export const PRO_DISCOVERY_BATCH_SIZE = 10;
 
 export type PlanTier = "free" | "pro";
 
@@ -82,7 +82,7 @@ export function limitsForTier(tier: PlanTier): PlanLimits {
   if (tier === "pro") {
     return {
       weeklyDiscoveries: Number.MAX_SAFE_INTEGER,
-      activeLeads: PRO_ACTIVE_LEADS,
+      activeLeads: Number.MAX_SAFE_INTEGER,
       weeklySimulations: Number.MAX_SAFE_INTEGER,
       discoverMore: true,
       stats: true,
@@ -177,7 +177,7 @@ export async function assertCanDiscover(
         "PLAN_PRO_REQUIRED",
       );
     }
-    if (ctx.usage.activeLeads >= ctx.limits.activeLeads) {
+    if (ctx.tier !== "pro" && ctx.usage.activeLeads >= ctx.limits.activeLeads) {
       throw new AppError(
         `Ai ${ctx.limits.activeLeads} lead-uri active. Marchează unele ca „Nu e potrivit” pentru a face loc.`,
         402,
@@ -195,7 +195,7 @@ export async function assertCanDiscover(
     );
   }
 
-  if (ctx.usage.activeLeads >= ctx.limits.activeLeads) {
+  if (ctx.tier !== "pro" && ctx.usage.activeLeads >= ctx.limits.activeLeads) {
     throw new AppError(
       `Ai atins limita de ${ctx.limits.activeLeads} lead-uri active. Marchează unele ca „Nu e potrivit” pentru a face loc.`,
       402,
@@ -271,10 +271,10 @@ export async function downgradeToFree(userId: string) {
 }
 
 export function discoveryLimitForPlan(ctx: PlanContext): number {
-  const remainingActive = Math.max(0, ctx.limits.activeLeads - ctx.usage.activeLeads);
   if (ctx.tier === "pro") {
-    return Math.min(remainingActive, 5);
+    return PRO_DISCOVERY_BATCH_SIZE;
   }
+  const remainingActive = Math.max(0, ctx.limits.activeLeads - ctx.usage.activeLeads);
   const remainingWeekly = Math.max(
     0,
     ctx.limits.weeklyDiscoveries - ctx.usage.weeklyDiscoveries,

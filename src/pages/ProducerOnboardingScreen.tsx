@@ -148,7 +148,7 @@ export function ProducerOnboardingScreen({
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 text-sm text-[#5a654f]">
-                <StepHint icon={MessageCircle} text="Chat pregătit" />
+                <StepHint icon={MessageCircle} text="Asistent pregătit" />
                 <StepHint icon={Store} text="Lead-uri locale" />
                 <StepHint icon={Send} text="Mesaj WhatsApp" />
               </div>
@@ -277,7 +277,7 @@ export function ProducerOnboardingScreen({
               </Button>
               <Button type="submit" variant="honey">
                 <Leaf className="h-4 w-4" />
-                Continuă spre chat
+                Continuă spre Asistent
               </Button>
             </div>
           </footer>

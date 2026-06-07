@@ -56,12 +56,14 @@ export function mapDiscoveredLeadToDto(lead: AiDiscoveredLead) {
     coordinates: lead.coordinates,
     needs: lead.needs ?? [],
     matchedNeeds: lead.matchedNeeds ?? [],
+    matchFactors: lead.matchFactors,
     website: lead.website ?? "",
     phone: lead.phone ?? "",
     contactPerson: lead.contactPerson ?? "",
     menuItems: lead.menuItems ?? "",
     notes: lead.notes ?? "",
     sourceUrls: lead.sourceUrls ?? [],
+    platformRegistered: lead.platformRegistered ?? false,
   };
 }
 

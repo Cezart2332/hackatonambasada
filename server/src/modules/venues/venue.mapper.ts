@@ -10,7 +10,27 @@ export type VenueProfileDto = {
   latitude: number | null;
   longitude: number | null;
   approvalStatus: "pending" | "approved" | "rejected";
+  productsNeeded: string;
+  supplyFrequency: string;
+  preferredDays: string;
+  needsUpdatedAt: string | null;
 };
+
+export type VenueSearchIntentDto = {
+  productsNeeded: string;
+  supplyFrequency: string;
+  preferredDays: string;
+  needsUpdatedAt: string | null;
+};
+
+export function mapVenueSearchIntent(profile: VenueProfile): VenueSearchIntentDto {
+  return {
+    productsNeeded: profile.productsNeeded,
+    supplyFrequency: profile.supplyFrequency,
+    preferredDays: profile.preferredDays,
+    needsUpdatedAt: profile.needsUpdatedAt?.toISOString() ?? null,
+  };
+}
 
 export function mapVenueProfile(profile: VenueProfile): VenueProfileDto {
   return {
@@ -28,5 +48,6 @@ export function mapVenueProfile(profile: VenueProfile): VenueProfileDto {
         : profile.approvalStatus === "REJECTED"
           ? "rejected"
           : "pending",
+    ...mapVenueSearchIntent(profile),
   };
 }

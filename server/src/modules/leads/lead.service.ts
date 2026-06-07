@@ -11,10 +11,16 @@ import {
 import {
   discoverLeads,
   isBuyerLeadId,
+  isPlatformVenueLeadId,
   listDiscoveredLeads,
   simulateCampaign,
   updateBuyerStatus,
 } from "./lead.ai.js";
+import {
+  listPlatformVenueLeadsForProducer,
+  mergeProducerLeadSources,
+  updatePlatformVenueLeadStatus,
+} from "../venues/venue-for-producer.service.js";
 import {
   mapDiscoveredLeadToDto,
   mapLeadForPlan,
@@ -113,7 +119,46 @@ async function discoverAiLeads(
     return null;
   }
 
-  return discovered.map(mapDiscoveredLeadToDto);
+  return discovered;
+}
+
+async function loadPlatformVenueLeads(
+  userId: string,
+  profile: Awaited<ReturnType<typeof getProfileContext>>,
+  input: MatchLeadsInput = {},
+) {
+  const { latitude, longitude } = await resolveProfileCoordinates(profile, input);
+  const productSummary = profile.products.map((p) => p.name).filter(Boolean).join(", ");
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+
+  return listPlatformVenueLeadsForProducer({
+    producerUserId: userId,
+    producerName: profile.businessName.trim() || user?.name || "Producător local",
+    latitude,
+    longitude,
+    rangeKm: input.rangeKm ?? profile.rangeKm ?? 35,
+    productSummary,
+    producerProducts: profile.products,
+  });
+}
+
+function mapMergedLeadsForPlan(
+  leads: Awaited<ReturnType<typeof discoverAiLeads>>,
+  plan: Awaited<ReturnType<typeof getPlanContext>>,
+) {
+  return (leads ?? []).map((lead) =>
+    mapLeadForPlan(
+      {
+        ...mapDiscoveredLeadToDto(lead),
+        status: lead.status ?? null,
+      },
+      plan.tier,
+      lead.status,
+    ),
+  );
 }
 
 export async function matchForUser(
@@ -127,12 +172,18 @@ export async function matchForUser(
     return [];
   }
 
-  const aiLeads = await discoverAiLeads(userId, { ...input, limit });
-  if (aiLeads?.length) {
+  const profile = await getProfileContext(userId);
+  const [platformLeads, aiLeads] = await Promise.all([
+    loadPlatformVenueLeads(userId, profile, input),
+    discoverAiLeads(userId, { ...input, limit }),
+  ]);
+  const merged = mergeProducerLeadSources(platformLeads, aiLeads ?? []);
+
+  if (merged.length) {
     if (accountType !== "VENUE" && accountType !== "venue") {
       await recordDiscovery(userId);
     }
-    return aiLeads;
+    return mapMergedLeadsForPlan(merged, ctx);
   }
 
   return [];
@@ -149,12 +200,18 @@ export async function matchMoreForUser(
     return [];
   }
 
-  const aiLeads = await discoverAiLeads(userId, { ...input, limit }, { discoverMore: true });
-  if (aiLeads?.length) {
+  const profile = await getProfileContext(userId);
+  const [platformLeads, aiLeads] = await Promise.all([
+    loadPlatformVenueLeads(userId, profile, input),
+    discoverAiLeads(userId, { ...input, limit }, { discoverMore: true }),
+  ]);
+  const merged = mergeProducerLeadSources(platformLeads, aiLeads ?? []);
+
+  if (merged.length) {
     if (accountType !== "VENUE" && accountType !== "venue") {
       await recordDiscovery(userId);
     }
-    return aiLeads;
+    return mapMergedLeadsForPlan(merged, ctx);
   }
 
   return [];
@@ -165,19 +222,15 @@ export async function listLeadsForUser(userId: string, accountType?: string) {
   const { latitude, longitude } = await resolveProfileCoordinates(profile);
   const plan = await getPlanContext(userId, accountType);
 
-  const aiListed = await listDiscoveredLeads(userId, latitude, longitude);
-  if (!aiListed?.length) return [];
+  const products = profile.products.map((p) => p.name).filter(Boolean);
+  const [platformLeads, aiListed] = await Promise.all([
+    loadPlatformVenueLeads(userId, profile),
+    listDiscoveredLeads(userId, latitude, longitude, products),
+  ]);
+  const merged = mergeProducerLeadSources(platformLeads, aiListed ?? []);
+  if (!merged.length) return [];
 
-  return aiListed.map((lead) =>
-    mapLeadForPlan(
-      {
-        ...mapDiscoveredLeadToDto(lead),
-        status: lead.status ?? null,
-      },
-      plan.tier,
-      lead.status,
-    ),
-  );
+  return mapMergedLeadsForPlan(merged, plan);
 }
 
 export async function getLeadById(userId: string, leadId: string, accountType?: string) {
@@ -193,6 +246,24 @@ export async function getLeadById(userId: string, leadId: string, accountType?: 
       products,
     );
     const found = listed?.find((l) => l.id === leadId);
+    if (found) {
+      return mapLeadForPlan(
+        {
+          ...mapDiscoveredLeadToDto(found),
+          status: found.status ?? null,
+        },
+        plan.tier,
+        found.status,
+      );
+    }
+    throw new AppError("Lead not found", 404, "NOT_FOUND");
+  }
+
+  if (isPlatformVenueLeadId(leadId)) {
+    const profile = await getProfileContext(userId);
+    const plan = await getPlanContext(userId, accountType);
+    const platformLeads = await loadPlatformVenueLeads(userId, profile);
+    const found = platformLeads.find((lead) => lead.id === leadId);
     if (found) {
       return mapLeadForPlan(
         {
@@ -287,6 +358,14 @@ export async function updateLeadStatus(
       throw new AppError("Nu am putut salva statusul lead-ului.", 502, "AI_STATUS_FAILED");
     }
     return { leadId, status };
+  }
+
+  if (isPlatformVenueLeadId(leadId)) {
+    const result = await updatePlatformVenueLeadStatus(userId, leadId, status);
+    if (!result) {
+      throw new AppError("Lead not found", 404, "NOT_FOUND");
+    }
+    return result;
   }
 
   throw new AppError("Lead not found", 404, "NOT_FOUND");

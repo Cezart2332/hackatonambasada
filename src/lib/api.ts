@@ -5,6 +5,8 @@ import { formatAvailableFromDisplay } from "./availableFrom";
 import { getPackagingLabel, getPriceUnitShort, normalizeLegacyProduct } from "./productCatalog";
 import type {
   AccountType,
+  ConversationSummary,
+  DirectMessage,
   Lead,
   LeadStats,
   LeadStatus,
@@ -53,6 +55,10 @@ export type ApiVenueProfile = {
   latitude: number | null;
   longitude: number | null;
   approvalStatus: "pending" | "approved" | "rejected";
+  productsNeeded: string;
+  supplyFrequency: string;
+  preferredDays: string;
+  needsUpdatedAt: string | null;
 };
 
 export type ApiAccount = {
@@ -314,6 +320,23 @@ export const api = {
 
   getVenueProfile: () => apiFetch<ApiVenueProfile>("/api/venues/me"),
 
+  updateVenueSearchIntent: (payload: {
+    productsNeeded: string;
+    supplyFrequency: string;
+    preferredDays: string;
+  }) =>
+    apiFetch<{
+      searchIntent: {
+        productsNeeded: string;
+        supplyFrequency: string;
+        preferredDays: string;
+        needsUpdatedAt: string | null;
+      };
+    }>("/api/venues/me/search-intent", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
   updateVenueProfile: (payload: ReturnType<typeof setupVenueToApiPayload>) =>
     apiFetch<ApiVenueProfile>("/api/venues/me", {
       method: "PUT",
@@ -507,5 +530,38 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ verified }),
     }),
+
+  listConversations: () =>
+    apiFetch<{ conversations: ConversationSummary[] }>("/api/messages/conversations"),
+
+  openConversation: (counterpartUserId: string) =>
+    apiFetch<{ conversation: ConversationSummary }>("/api/messages/conversations", {
+      method: "POST",
+      body: JSON.stringify({ counterpartUserId }),
+    }),
+
+  getConversationMessages: (conversationId: string, options?: { limit?: number; before?: string }) => {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.before) params.set("before", options.before);
+    const query = params.toString();
+    return apiFetch<{ messages: DirectMessage[] }>(
+      `/api/messages/conversations/${conversationId}${query ? `?${query}` : ""}`,
+    );
+  },
+
+  sendDirectMessage: (conversationId: string, body: string) =>
+    apiFetch<{ message: DirectMessage }>(`/api/messages/conversations/${conversationId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }),
+
+  markConversationRead: (conversationId: string) =>
+    apiFetch<{ ok: boolean }>(`/api/messages/conversations/${conversationId}/read`, {
+      method: "PATCH",
+    }),
+
+  getUnreadMessageCount: () =>
+    apiFetch<{ unreadCount: number }>("/api/messages/unread-count"),
 
 };

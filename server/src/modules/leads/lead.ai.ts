@@ -16,6 +16,14 @@ export type AiDiscoveredLead = {
   coordinates: [number, number];
   needs?: string[];
   matchedNeeds?: string[];
+  matchFactors?: {
+    productScore: number;
+    historyScore?: number;
+    distanceKm: number;
+    producerRangeKm: number;
+    inRange: boolean;
+    proximityBonus: number;
+  };
   website?: string;
   phone?: string;
   contactPerson?: string;
@@ -23,6 +31,7 @@ export type AiDiscoveredLead = {
   notes?: string;
   sourceUrls?: string[];
   fromCache?: boolean;
+  platformRegistered?: boolean;
   status?: string | null;
 };
 
@@ -168,4 +177,8 @@ export async function simulateCampaign(params: {
 
 export function isBuyerLeadId(leadId: string): boolean {
   return leadId.startsWith("buyer_");
+}
+
+export function isPlatformVenueLeadId(leadId: string): boolean {
+  return Boolean(leadId) && !isBuyerLeadId(leadId);
 }

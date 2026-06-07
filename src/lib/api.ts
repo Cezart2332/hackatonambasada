@@ -157,13 +157,15 @@ export function setupToApiPayload(setup: ProducerSetup | Profile) {
     rangeKm: parseRangeKm(("range" in setup && setup.range) || "35 km"),
     deliveryDays: setup.days ?? "",
     extraDetails: ("extraDetails" in setup && setup.extraDetails) || "",
-    products: (setup.products ?? []).map((product) => ({
-      name: product.name,
-      estimatedQuantity: product.estimatedQuantity,
-      unit: product.unit,
-      pricePerKg: product.pricePerKg,
-      availableFrom: product.availableFrom,
-    })),
+    products: (setup.products ?? [])
+      .filter((product) => product.name.trim().length > 0)
+      .map((product) => ({
+        name: product.name.trim(),
+        estimatedQuantity: product.estimatedQuantity,
+        unit: product.unit,
+        pricePerKg: product.pricePerKg,
+        availableFrom: product.availableFrom,
+      })),
   };
 }
 

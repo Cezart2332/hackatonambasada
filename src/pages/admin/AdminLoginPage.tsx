@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { KeyRound, Loader2, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ export function AdminLoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+  const redirectedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -23,9 +24,10 @@ export function AdminLoginPage() {
     async function checkSession() {
       try {
         const { data } = await authClient.getSession();
-        if (!data?.user || cancelled) return;
+        if (!data?.user || cancelled || redirectedRef.current) return;
         const { accountType } = await api.getAccount();
         if (accountType === "admin") {
+          redirectedRef.current = true;
           navigate("/admin", { replace: true });
         }
       } catch {
@@ -58,6 +60,7 @@ export function AdminLoginPage() {
         throw new Error("Acest cont nu are drepturi de administrator.");
       }
 
+      redirectedRef.current = true;
       navigate("/admin", { replace: true });
     } catch (caught) {
       setError(messageFromUnknownError(caught, "Autentificare eșuată."));

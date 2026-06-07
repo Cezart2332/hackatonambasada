@@ -59,6 +59,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VenueChatProgress } from "@/components/VenueChatProgress";
+import { VenueMatchDiagnosticsPanel } from "@/components/VenueMatchDiagnosticsPanel";
 import { MatchWhySection } from "@/components/MatchWhySection";
 import { ProducerOfferList } from "@/components/ProducerOfferList";
 import { useVenueChatSession } from "@/hooks/useVenueChatSession";
@@ -486,6 +487,7 @@ function App() {
   }, []);
 
   const displayLeadCount = activeLeadCount || leads.length;
+  const venueProducerCount = leads.length;
 
   function now() {
     return new Intl.DateTimeFormat("ro-RO", {
@@ -949,55 +951,6 @@ function App() {
     }, delay);
   }
 
-  function addRecommendations(delay = 740) {
-    setTyping(true);
-    window.setTimeout(async () => {
-      try {
-        const { leads: matchedLeads } = await api.matchLeads();
-        setLeads(matchedLeads);
-        setMessages((items) => [
-          ...items,
-          {
-            id: crypto.randomUUID(),
-            role: "agent",
-            kind: "text",
-            text:
-              matchedLeads.length > 0
-                ? "Am găsit câteva locuri bune. Îți las mai jos lead-urile și de ce cred că merită încercate."
-                : "Nu am găsit lead-uri în raza ta acum. Mărește raza de livrare sau actualizează localitatea din profil.",
-            time: now(),
-          },
-          ...matchedLeads.map<ChatMessage>((lead) => ({
-            id: crypto.randomUUID(),
-            role: "agent",
-            kind: "lead",
-            leadId: lead.id,
-            time: now(),
-          })),
-        ]);
-      } catch (error) {
-        if (!handlePlanLimit(error)) {
-          setMessages((items) => [
-            ...items,
-            {
-              id: crypto.randomUUID(),
-              role: "agent",
-              kind: "text",
-              text: messageFromUnknownError(
-                error,
-                "Nu am putut încărca lead-urile. Verifică conexiunea la server.",
-              ),
-              time: now(),
-            },
-          ]);
-        }
-      } finally {
-        setTyping(false);
-        void refreshPlan();
-      }
-    }, delay);
-  }
-
   async function searchMoreLeads() {
     if (searchingMoreLeads || typing) return;
     setSearchingMoreLeads(true);
@@ -1023,6 +976,32 @@ function App() {
             },
           ]);
         }
+        return;
+      }
+
+      if (leads.length === 0) {
+        const { leads: matchedLeads } = await api.matchLeads();
+        setLeads(matchedLeads);
+        setMessages((items) => [
+          ...items,
+          {
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "text",
+            text:
+              matchedLeads.length > 0
+                ? `Am găsit ${matchedLeads.length} lead-uri. Le vezi mai jos și în Director.`
+                : "Nu am găsit lead-uri în raza ta acum. Mărește raza de livrare sau actualizează localitatea din profil.",
+            time: now(),
+          },
+          ...matchedLeads.map<ChatMessage>((lead) => ({
+            id: crypto.randomUUID(),
+            role: "agent",
+            kind: "lead",
+            leadId: lead.id,
+            time: now(),
+          })),
+        ]);
         return;
       }
 
@@ -1094,7 +1073,7 @@ function App() {
         id: crypto.randomUUID(),
         role: "agent",
         kind: "text",
-        text: `Bun venit${greetingName}. Am pregătit profilul tău de producător și îl folosesc ca să caut lead-uri potrivite.`,
+        text: `Bun venit${greetingName}. Profilul tău de producător e salvat — când vrei lead-uri noi, le ceri explicit din Director sau din chat.`,
         time: now(),
       },
     ];
@@ -1122,7 +1101,7 @@ function App() {
         id: crypto.randomUUID(),
         role: "agent",
         kind: "text",
-        text: "Profilul e complet. Îți arăt câteva locuri care ar putea cumpăra de la tine săptămâna asta.",
+        text: "Profilul e complet. Deschide Director și apasă «Caută alte lead-uri» când vrei recomandări noi, sau spune-mi în chat să caut.",
         time: now(),
       });
     }
@@ -1134,10 +1113,6 @@ function App() {
     setMobileChatOpen(false);
     setDashboardView("chat");
     setScreen("chat");
-
-    if (firstStepIndex >= producerOnboardingSteps.length) {
-      addRecommendations(680);
-    }
   }
 
   function initVenueChat(nextProfile: Profile, contactName?: string, freshSession = false) {
@@ -1308,13 +1283,31 @@ function App() {
       throw new Error(messageFromAuthError(result.error));
     }
 
-    setAccount({ name, email, accountType });
     const signedUpUser = result.data?.user;
-    if (signedUpUser?.id) setUserId(signedUpUser.id);
+    if (!signedUpUser?.id) {
+      throw new Error("Contul a fost creat, dar sesiunea nu a putut fi pornită. Încearcă să te loghezi.");
+    }
+
+    setUserId(signedUpUser.id);
+
+    try {
+      if (accountType === "venue") {
+        const venueSetup = setup as VenueSetup;
+        await api.updateVenueProfile(setupVenueToApiPayload(venueSetup));
+      } else {
+        const producerSetup = setup as ProducerSetup;
+        await api.updateProfile(setupToApiPayload(producerSetup));
+      }
+    } catch (error) {
+      await authClient.signOut();
+      setUserId(null);
+      throw error;
+    }
+
+    setAccount({ name, email, accountType });
 
     if (accountType === "venue") {
       const venueSetup = setup as VenueSetup;
-      await api.updateVenueProfile(setupVenueToApiPayload(venueSetup));
       const { approvalStatus: nextApprovalStatus } = await api.getAccount();
       if (nextApprovalStatus !== "approved") {
         setApprovalStatus(nextApprovalStatus || "pending");
@@ -1336,7 +1329,6 @@ function App() {
     }
 
     const producerSetup = setup as ProducerSetup;
-    await api.updateProfile(setupToApiPayload(producerSetup));
     const { approvalStatus: nextApprovalStatus } = await api.getAccount();
     if (nextApprovalStatus !== "approved") {
       setApprovalStatus(nextApprovalStatus || "pending");
@@ -1497,11 +1489,8 @@ function App() {
     void addOnboardingAgentReply(
       answeredStep.key,
       cleanValue,
-      `Perfect. Am notat: ${nextProfile.product}, ${nextProfile.quantity}, din ${nextProfile.location}, livrare ${nextProfile.range}, în zilele ${nextProfile.days}.`,
+      `Perfect. Am notat: ${nextProfile.product}, ${nextProfile.quantity}, din ${nextProfile.location}, livrare ${nextProfile.range}, în zilele ${nextProfile.days}. Deschide Director când vrei să cauți lead-uri.`,
     );
-    if (!userId) {
-      addRecommendations(1100);
-    }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1593,7 +1582,7 @@ function App() {
       <div className="mx-auto flex h-full w-full max-w-[1360px] flex-col overflow-hidden border border-[#d9d0b8] bg-card shadow-warm md:rounded-[24px]">
         <DashboardHeader
           profile={profile}
-          activeLeadCount={displayLeadCount}
+          activeLeadCount={isVenue ? venueProducerCount : displayLeadCount}
           activeView={dashboardView}
           onViewChange={setDashboardView}
           isVenue={isVenue}
@@ -1604,7 +1593,7 @@ function App() {
           isVenue ? (
             <VenueProfilePage
               profile={profile}
-              activeMatchCount={displayLeadCount}
+              activeMatchCount={venueProducerCount}
               sessionNeeds={venueSessionNeeds}
               sessionFrequency={venueSessionSupplyFrequency}
               sessionPreferredDays={venueSessionPreferredDays}
@@ -1697,6 +1686,21 @@ function App() {
                     {isVenue && dashboardView === "chat" ? (
                       <VenueChatProgress />
                     ) : null}
+                    {isVenue && onboardingDone && leads.length === 0 && venueMatchDiagnostics ? (
+                      <div className="mx-auto mb-2 max-w-3xl">
+                        <VenueMatchDiagnosticsPanel
+                          diagnostics={venueMatchDiagnostics}
+                          productLabel={venueSessionNeeds.trim() || undefined}
+                          scope={venueProducerScope}
+                          onShowAll={
+                            venueProducerScope === "matched"
+                              ? () => void searchMoreLeads()
+                              : undefined
+                          }
+                          compact
+                        />
+                      </div>
+                    ) : null}
                   <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2 pb-1">
                     {!isVenue ? (
                       <Button
@@ -1729,7 +1733,7 @@ function App() {
                         ) : (
                           <Search className="h-3.5 w-3.5" />
                         )}
-                        Caută alte lead-uri
+                        {leads.length === 0 ? "Caută lead-uri" : "Caută alte lead-uri"}
                       </Button>
                     ) : null}
                     {(isVenue ? venueLeadsFromChat(messages, leads) : leads.slice(0, 3)).map((lead) => (
@@ -1777,7 +1781,7 @@ function App() {
                   leads={leads}
                   statuses={leadStatuses}
                   failedFeedbacks={failedFeedbacks}
-                  activeLeadCount={displayLeadCount}
+                  activeLeadCount={isVenue ? venueProducerCount : displayLeadCount}
                   searchingMore={searchingMoreLeads}
                   plan={plan}
                   stats={leadStats}
@@ -1802,16 +1806,19 @@ function App() {
                       ? venueProducerScope === "matched"
                         ? () => void searchMoreLeads()
                         : undefined
-                      : plan?.limits.discoverMore
-                        ? () => void searchMoreLeads()
-                        : undefined
+                      : () => void searchMoreLeads()
                   }
-                  onUpgrade={() => openPaywall("Directorul complet și „Caută alte lead-uri” sunt în planul Pro.")}
+                  searchMoreLabel={
+                    !isVenue && leads.length === 0 ? "Caută lead-uri" : undefined
+                  }
+                  onUpgrade={() => openPaywall("Căutarea de lead-uri suplimentare este disponibilă în planul Pro.")}
                   onDetails={setSelectedLead}
                   onMessage={openMessageLead}
                   onStatus={updateLeadStatus}
                   onWhatsAppClick={handleWhatsAppRedirect}
                   onFailedClick={setFailedLeadDialog}
+                  matchDiagnostics={isVenue ? venueMatchDiagnostics : undefined}
+                  matchProductLabel={isVenue ? venueSessionNeeds.trim() || undefined : undefined}
                 />
               </div>
             ) : null}
@@ -1932,10 +1939,10 @@ function venueDashboardIcon(activeView: DashboardView, venueType?: Profile["venu
   return icons[venueType ?? "restaurant"] ?? Store;
 }
 
-function venueDashboardSubtitle(activeView: DashboardView, profile: Profile, activeLeadCount: number) {
+function venueDashboardSubtitle(activeView: DashboardView, profile: Profile, producerCount: number) {
   const location = profile.location?.trim() || "Dobrogea";
   if (activeView === "director") {
-    return `${activeLeadCount} producători · ${location}`;
+    return `${producerCount} potriviți · ${location}`;
   }
   if (activeView === "profile") {
     return [profile.businessName, location].filter(Boolean).join(" · ");

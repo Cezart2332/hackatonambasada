@@ -165,6 +165,19 @@ export async function listLeadsForUser(userId: string, accountType?: string) {
   const { latitude, longitude } = await resolveProfileCoordinates(profile);
   const plan = await getPlanContext(userId, accountType);
 
+  const aiListed = await listDiscoveredLeads(userId, latitude, longitude);
+  if (!aiListed?.length) return [];
+
+  return aiListed.map((lead) =>
+    mapLeadForPlan(
+      {
+        ...mapDiscoveredLeadToDto(lead),
+        status: lead.status ?? null,
+      },
+      plan.tier,
+      lead.status,
+    ),
+  );
   const products = profile.products.map((p) => p.name).filter(Boolean);
   const aiListed = await listDiscoveredLeads(userId, latitude, longitude, products);
   if (aiListed?.length) {

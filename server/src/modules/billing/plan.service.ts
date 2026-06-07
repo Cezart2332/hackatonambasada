@@ -197,7 +197,7 @@ export async function assertCanDiscover(
 
   if (ctx.usage.activeLeads >= ctx.limits.activeLeads) {
     throw new AppError(
-      `Ai atins limita de ${ctx.limits.activeLeads} lead-uri active.`,
+      `Ai atins limita de ${ctx.limits.activeLeads} lead-uri active. Marchează unele ca „Nu e potrivit” pentru a face loc.`,
       402,
       "PLAN_LIMIT_ACTIVE",
     );

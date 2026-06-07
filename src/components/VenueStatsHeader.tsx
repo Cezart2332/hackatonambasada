@@ -16,12 +16,15 @@ export function VenueStatsHeader({
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
 }) {
-  const active = Object.values(statuses).filter((s) => s !== "Nu e potrivit").length;
   const contacted = Object.values(statuses).filter((s) => s === "Contactat" || s === "A răspuns" || s === "A cumpărat").length;
+  const rejected = Object.values(statuses).filter((s) => s === "Nu e potrivit").length;
 
   return (
     <div className="grid gap-2 rounded-xl border border-[#d7e4c4] bg-[#f4f8ee] px-3 py-1.5 text-xs sm:grid-cols-2 sm:text-sm">
-      <StatPill label="Potriviți" value={`${leads.length} producători · ${active} activi`} />
+      <StatPill
+        label="Potriviți"
+        value={rejected ? `${leads.length} în listă · ${rejected} respinși` : `${leads.length} în listă`}
+      />
       <StatPill label="Contact" value={`${contacted} contactați / răspuns`} />
     </div>
   );

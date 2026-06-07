@@ -351,7 +351,7 @@ export function AdminDashboardPage() {
   useEffect(() => {
     let cancelled = false;
 
-    async function bootstrap() {
+    async function verifyAdmin() {
       try {
         const { data } = await authClient.getSession();
         if (!data?.user || cancelled) {
@@ -359,22 +359,21 @@ export function AdminDashboardPage() {
           return;
         }
         const { accountType } = await api.getAccount();
-        if (accountType !== "admin") {
+        if (accountType !== "admin" || cancelled) {
           setAuthorized(false);
           return;
         }
         setAuthorized(true);
-        await reloadAll();
       } catch {
         if (!cancelled) setAuthorized(false);
       }
     }
 
-    void bootstrap();
+    void verifyAdmin();
     return () => {
       cancelled = true;
     };
-  }, [reloadAll]);
+  }, []);
 
   useEffect(() => {
     if (authorized) {

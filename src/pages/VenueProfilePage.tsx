@@ -60,7 +60,7 @@ export function VenueProfilePage({
               Actualizează datele de contact și locația. Ce produse cauți le spui în Chat.
             </p>
           </div>
-          <Badge variant="warm">{activeMatchCount} producători activi</Badge>
+          <Badge variant="warm">{activeMatchCount} producători potriviți</Badge>
         </div>
 
         <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">

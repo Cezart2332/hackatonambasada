@@ -13,6 +13,7 @@ import {
   Droplets,
   Handshake,
   Home,
+  Inbox,
   KeyRound,
   LayoutGrid,
   Leaf,
@@ -57,7 +58,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VenueChatProgress } from "@/components/VenueChatProgress";
 import { VenueMatchDiagnosticsPanel } from "@/components/VenueMatchDiagnosticsPanel";
 import { MatchWhySection } from "@/components/MatchWhySection";
@@ -69,6 +69,7 @@ import {
   extractVenueNeedsFromMessage,
   isVenueReadyForMatching,
   mergeVenueProductNeeds,
+  readVenueSessionFromStorage,
   venueLeadsFromChat,
   venueProfileToChatSnapshot,
 } from "@/lib/venueChatUtils";
@@ -90,7 +91,6 @@ import type {
   ChatMessage,
   DashboardView,
   Lead,
-  LeadStats,
   LeadStatus,
   LocationChoice,
   PlanContext,
@@ -112,9 +112,11 @@ import { ProPaywallDialog } from "@/components/ProPaywallDialog";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { VenueProfilePage } from "@/pages/VenueProfilePage";
 import { DirectorPage } from "@/pages/DirectorPage";
+import { MessagesPage } from "@/pages/MessagesPage";
 import { StatusBadge } from "@/pages/LeadMapPanel";
 import { CampaignSimPanel } from "@/pages/CampaignSimPanel";
 import { AgentAvatar } from "@/components/AgentAvatar";
+import { PlatformRegisteredBadge } from "@/components/PlatformRegisteredBadge";
 import { createProduct, patchProducerProduct } from "@/components/ProductEditor";
 import { LocationSearch } from "@/components/LocationSearch";
 import { SectionLabel, FieldBlock, QuickChoiceRow } from "@/components/FormBlocks";
@@ -200,7 +202,7 @@ const venueFailedSuggestions = [
   "Avem deja un furnizor stabil pentru această categorie",
 ];
 
-const feedbackOptions: LeadStatus[] = ["Bun", "Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
+const feedbackOptions: LeadStatus[] = ["Nu e potrivit", "Contactat", "A răspuns", "A cumpărat"];
 
 const productIcons = [
   { label: "miere", icon: Droplets, className: "bg-amber-100 text-amber-800" },
@@ -319,6 +321,7 @@ function App() {
   const [typing, setTyping] = useState(false);
   const [leadStatuses, setLeadStatuses] = useState<Record<string, LeadStatus>>({});
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [newLeadIds, setNewLeadIds] = useState<Set<string>>(() => new Set());
   const [authChecking, setAuthChecking] = useState(true);
   const [approvalStatus, setApprovalStatus] = useState<ApprovalStatus | null>(null);
   const [approvalRefreshing, setApprovalRefreshing] = useState(false);
@@ -330,6 +333,7 @@ function App() {
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const venueSearchSyncTimer = useRef<number | null>(null);
   const [failedFeedbacks, setFailedFeedbacks] = useState<Record<string, string>>({});
   const [failedLeadDialog, setFailedLeadDialog] = useState<Lead | null>(null);
   const [customFailedReason, setCustomFailedReason] = useState("");
@@ -339,12 +343,13 @@ function App() {
   const [campaignSimSteps, setCampaignSimSteps] = useState<SimulatedCampaignStep[]>([]);
   const [campaignSimDisclaimer, setCampaignSimDisclaimer] = useState("");
   const [plan, setPlan] = useState<PlanContext | null>(null);
-  const [leadStats, setLeadStats] = useState<LeadStats | null>(null);
   const [planUpgrading, setPlanUpgrading] = useState(false);
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [paywallMessage, setPaywallMessage] = useState("");
   const [venueProducerScope, setVenueProducerScope] = useState<"matched" | "all">("matched");
   const [venueMatchDiagnostics, setVenueMatchDiagnostics] = useState<import("@/lib/venueChatUtils").VenueMatchDiagnostics | undefined>();
+  const [messageUnreadCount, setMessageUnreadCount] = useState(0);
+  const [pendingChatCounterpartId, setPendingChatCounterpartId] = useState<string | null>(null);
   const venueChat = useVenueChatSession(userId);
 
   const isVenue = account?.accountType === "venue";
@@ -364,9 +369,46 @@ function App() {
     [leadStatuses],
   );
 
+  function scheduleVenueSearchIntentSync(session: {
+    needs: string;
+    supplyFrequency: string;
+    preferredDays: string;
+  }) {
+    if (!userId || account?.accountType !== "venue") return;
+    if (venueSearchSyncTimer.current) {
+      window.clearTimeout(venueSearchSyncTimer.current);
+    }
+    venueSearchSyncTimer.current = window.setTimeout(() => {
+      void api
+        .updateVenueSearchIntent({
+          productsNeeded: session.needs,
+          supplyFrequency: session.supplyFrequency,
+          preferredDays: session.preferredDays,
+        })
+        .catch(() => undefined);
+    }, 600);
+  }
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, typing, leadStatuses]);
+
+  useEffect(() => {
+    if (screen !== "chat" || !userId) return;
+
+    async function refreshUnreadMessages() {
+      try {
+        const { unreadCount } = await api.getUnreadMessageCount();
+        setMessageUnreadCount(unreadCount);
+      } catch {
+        // optional badge
+      }
+    }
+
+    void refreshUnreadMessages();
+    const interval = window.setInterval(() => void refreshUnreadMessages(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [screen, userId]);
 
   async function refreshPlan() {
     if (isVenue) return;
@@ -375,19 +417,6 @@ function App() {
       setPlan(nextPlan);
     } catch {
       // plan optional for UI
-    }
-  }
-
-  async function refreshLeadStats() {
-    if (isVenue || plan?.tier !== "pro") {
-      setLeadStats(null);
-      return;
-    }
-    try {
-      const { stats } = await api.getLeadStats();
-      setLeadStats(stats);
-    } catch {
-      setLeadStats(null);
     }
   }
 
@@ -410,12 +439,12 @@ function App() {
       setPlan(nextPlan);
       setPaywallOpen(false);
       addAgentText(
-        "Pro activ (demo). Acum ai până la 15 lead-uri active, statistici în Director și detalii bogate.",
+        "Pro activ (demo). Poți genera lead-uri nelimitat — câte 10 per căutare — plus detalii bogate în Director.",
         280,
       );
-      await refreshLeadStats();
       const { leads: refreshedLeads } = await api.listLeads();
       setLeads(refreshedLeads);
+      setNewLeadIds(new Set());
     } catch (error) {
       addAgentText(messageFromUnknownError(error, "Nu am putut activa Pro acum."), 260);
     } finally {
@@ -429,7 +458,6 @@ function App() {
     try {
       const { plan: nextPlan } = await api.downgradeFree();
       setPlan(nextPlan);
-      setLeadStats(null);
       addAgentText("Ai revenit la planul Free (demo).", 260);
     } catch (error) {
       addAgentText(messageFromUnknownError(error, "Nu am putut reveni la Free acum."), 260);
@@ -443,12 +471,6 @@ function App() {
       void refreshPlan();
     }
   }, [isVenue, screen, leads.length, leadStatuses]);
-
-  useEffect(() => {
-    if (dashboardView === "director" && plan?.tier === "pro" && !isVenue) {
-      void refreshLeadStats();
-    }
-  }, [dashboardView, plan?.tier, isVenue, leads.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -658,6 +680,11 @@ function App() {
           supplyFrequency: sessionFrequency,
           preferredDays: sessionDays,
         });
+        scheduleVenueSearchIntentSync({
+          needs: sessionNeeds,
+          supplyFrequency: sessionFrequency,
+          preferredDays: sessionDays,
+        });
 
         const sessionSnapshot = {
           needs: sessionNeeds,
@@ -756,6 +783,7 @@ function App() {
         const newLeads = agentLeads.filter((l) => !existingIds.has(l.id));
         if (newLeads.length) {
           setLeads((current) => [...current, ...newLeads]);
+          setNewLeadIds(new Set(newLeads.map((l) => l.id)));
           setMessages((items) => [
             ...items,
             ...newLeads.map<ChatMessage>((lead) => ({
@@ -836,7 +864,19 @@ function App() {
     }
   }
 
+  function openPlatformChat(counterpartUserId: string) {
+    setPendingChatCounterpartId(counterpartUserId);
+    setDashboardView("messages");
+  }
+
   function openMessageLead(lead: Lead) {
+    const isPlatformPeer = Boolean(lead.platformRegistered) || isVenue;
+
+    if (isPlatformPeer) {
+      openPlatformChat(lead.id);
+      return;
+    }
+
     setMessageLead(lead);
     setMessageDraft(lead.contact);
     setMessageDraftLoading(true);
@@ -982,6 +1022,7 @@ function App() {
       if (leads.length === 0) {
         const { leads: matchedLeads } = await api.matchLeads();
         setLeads(matchedLeads);
+        setNewLeadIds(new Set(matchedLeads.map((l) => l.id)));
         setMessages((items) => [
           ...items,
           {
@@ -1010,6 +1051,7 @@ function App() {
       const newLeads = freshLeads.filter((l) => !existingIds.has(l.id));
 
       if (newLeads.length === 0) {
+        setNewLeadIds(new Set());
         setMessages((items) => [
           ...items,
           {
@@ -1024,6 +1066,7 @@ function App() {
       }
 
       setLeads((current) => [...current, ...newLeads]);
+      setNewLeadIds(new Set(newLeads.map((l) => l.id)));
       setMessages((items) => [
         ...items,
         {
@@ -1073,7 +1116,7 @@ function App() {
         id: crypto.randomUUID(),
         role: "agent",
         kind: "text",
-        text: `Bun venit${greetingName}. Profilul tău de producător e salvat — când vrei lead-uri noi, le ceri explicit din Director sau din chat.`,
+        text: `Bun venit${greetingName}. Profilul tău de producător e salvat — când vrei lead-uri noi, le ceri explicit din Director sau din Asistent.`,
         time: now(),
       },
     ];
@@ -1101,7 +1144,7 @@ function App() {
         id: crypto.randomUUID(),
         role: "agent",
         kind: "text",
-        text: "Profilul e complet. Deschide Director și apasă «Caută alte lead-uri» când vrei recomandări noi, sau spune-mi în chat să caut.",
+        text: "Profilul e complet. Deschide Director și apasă «Caută alte lead-uri» când vrei recomandări noi, sau spune-mi în Asistent să caut.",
         time: now(),
       });
     }
@@ -1157,7 +1200,22 @@ function App() {
       const venueDto = await api.getVenueProfile();
       const restoredProfile = apiVenueProfileToFrontend(venueDto, { contactName: user.name });
       initVenueChat(restoredProfile, user.name, false);
-      if (user.id) venueChat.hydrate(user.id);
+      if (user.id) {
+        venueChat.hydrate(user.id);
+        const localSession = readVenueSessionFromStorage(user.id);
+        const serverHasIntent = Boolean(
+          venueDto.productsNeeded.trim() ||
+            venueDto.supplyFrequency.trim() ||
+            venueDto.preferredDays.trim(),
+        );
+        if (serverHasIntent && !localSession.needs.trim()) {
+          venueChat.updateSession({
+            needs: venueDto.productsNeeded,
+            supplyFrequency: venueDto.supplyFrequency,
+            preferredDays: venueDto.preferredDays,
+          });
+        }
+      }
 
       void api
         .listMatchedProducers()
@@ -1230,6 +1288,7 @@ function App() {
     setApprovalStatus(null);
     setMessages([]);
     setLeads([]);
+    setNewLeadIds(new Set());
     setLeadStatuses({});
     venueChat.reset(userId);
     setCurrentStep(0);
@@ -1587,6 +1646,8 @@ function App() {
           onViewChange={setDashboardView}
           isVenue={isVenue}
           venueSessionNeeds={venueSessionNeeds}
+          messageUnreadCount={messageUnreadCount}
+          planTier={!isVenue ? (plan?.tier ?? "free") : undefined}
         />
 
         {dashboardView === "profile" ? (
@@ -1651,6 +1712,11 @@ function App() {
                       lead={message.kind === "lead" ? leads.find((item) => item.id === message.leadId) : undefined}
                       status={message.kind === "lead" ? leadStatuses[message.leadId] : undefined}
                       failedFeedback={message.kind === "lead" ? failedFeedbacks[message.leadId] : undefined}
+                      isNewLead={
+                        !isVenue &&
+                        message.kind === "lead" &&
+                        Boolean(message.leadId && newLeadIds.has(message.leadId))
+                      }
                       onDetails={setSelectedLead}
                       onMessage={openMessageLead}
                       onStatus={updateLeadStatus}
@@ -1775,16 +1841,24 @@ function App() {
               </div>
             </section>
 
+            {dashboardView === "messages" ? (
+              <MessagesPage
+                isVenue={isVenue}
+                isActive={dashboardView === "messages"}
+                pendingCounterpartId={pendingChatCounterpartId}
+                onPendingCounterpartHandled={() => setPendingChatCounterpartId(null)}
+                onUnreadCountChange={setMessageUnreadCount}
+              />
+            ) : null}
+
             {dashboardView === "director" ? (
               <div className="flex min-h-0 flex-1 overflow-hidden">
                 <DirectorPage
                   leads={leads}
                   statuses={leadStatuses}
                   failedFeedbacks={failedFeedbacks}
-                  activeLeadCount={isVenue ? venueProducerCount : displayLeadCount}
+                  newLeadIds={!isVenue ? newLeadIds : undefined}
                   searchingMore={searchingMoreLeads}
-                  plan={plan}
-                  stats={leadStats}
                   products={profile.products ?? []}
                   productChips={
                     isVenue
@@ -1811,7 +1885,6 @@ function App() {
                   searchMoreLabel={
                     !isVenue && leads.length === 0 ? "Caută lead-uri" : undefined
                   }
-                  onUpgrade={() => openPaywall("Căutarea de lead-uri suplimentare este disponibilă în planul Pro.")}
                   onDetails={setSelectedLead}
                   onMessage={openMessageLead}
                   onStatus={updateLeadStatus}
@@ -1826,7 +1899,11 @@ function App() {
         )}
       </div>
 
-      <MobileBottomNav activeView={dashboardView} onViewChange={setDashboardView} />
+      <MobileBottomNav
+        activeView={dashboardView}
+        onViewChange={setDashboardView}
+        messageUnreadCount={messageUnreadCount}
+      />
       <ProPaywallDialog
         open={paywallOpen}
         message={paywallMessage}
@@ -1922,12 +1999,14 @@ function App() {
 
 function venueDashboardTitle(activeView: DashboardView, profile: Profile) {
   if (activeView === "director") return "Director producători";
+  if (activeView === "messages") return "Mesaje";
   if (activeView === "profile") return "Profil local";
   return profile.businessName?.trim() || "Localul tău";
 }
 
 function venueDashboardIcon(activeView: DashboardView, venueType?: Profile["venueType"]) {
   if (activeView === "director") return LayoutGrid;
+  if (activeView === "messages") return Inbox;
   if (activeView === "profile") return UserRound;
   const icons = {
     restaurant: Utensils,
@@ -1944,10 +2023,13 @@ function venueDashboardSubtitle(activeView: DashboardView, profile: Profile, pro
   if (activeView === "director") {
     return `${producerCount} potriviți · ${location}`;
   }
+  if (activeView === "messages") {
+    return "Conversații directe cu producători înregistrați";
+  }
   if (activeView === "profile") {
     return [profile.businessName, location].filter(Boolean).join(" · ");
   }
-  return `${location} · spune în chat ce produse cauți`;
+  return `${location} · spune asistentului ce produse cauți`;
 }
 
 function DashboardHeader({
@@ -1957,6 +2039,8 @@ function DashboardHeader({
   onViewChange,
   isVenue = false,
   venueSessionNeeds = "",
+  messageUnreadCount = 0,
+  planTier,
 }: {
   profile: Profile;
   activeLeadCount: number;
@@ -1964,6 +2048,8 @@ function DashboardHeader({
   onViewChange: (view: DashboardView) => void;
   isVenue?: boolean;
   venueSessionNeeds?: string;
+  messageUnreadCount?: number;
+  planTier?: "free" | "pro";
 }) {
   const productSummary = summarizeProducts(profile.products);
   const title = isVenue
@@ -1971,7 +2057,9 @@ function DashboardHeader({
     : "Warm Leads";
   const subtitle = isVenue
     ? venueDashboardSubtitle(activeView, profile, activeLeadCount)
-    : `${productSummary.product || "Produse"} · ${profile.location || "Dobrogea"} · ${activeLeadCount} lead-uri`;
+    : activeView === "messages"
+      ? "Conversații directe cu localuri înregistrate"
+      : `${productSummary.product || "Produse"} · ${profile.location || "Dobrogea"} · ${activeLeadCount} lead-uri`;
   const HeaderIcon = isVenue ? venueDashboardIcon(activeView, profile.venueType) : Wheat;
 
   return (
@@ -1987,10 +2075,24 @@ function DashboardHeader({
           </div>
         </div>
 
-        <div className="hidden shrink-0 rounded-full border border-[#ded5bf] bg-[#fffaf0] p-1 md:flex">
-          <DashboardNavButton active={activeView === "chat"} icon={MessageCircle} label="Chat" onClick={() => onViewChange("chat")} />
-          <DashboardNavButton active={activeView === "director"} icon={LayoutGrid} label="Director" onClick={() => onViewChange("director")} />
-          <DashboardNavButton active={activeView === "profile"} icon={UserRound} label="Profil" onClick={() => onViewChange("profile")} />
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {!isVenue && planTier ? (
+            <Badge variant={planTier === "pro" ? "olive" : "warm"}>
+              {planTier === "pro" ? "Pro plan" : "Free plan"}
+            </Badge>
+          ) : null}
+          <div className="hidden rounded-full border border-[#ded5bf] bg-[#fffaf0] p-1 md:flex">
+            <DashboardNavButton active={activeView === "chat"} icon={MessageCircle} label="Asistent" onClick={() => onViewChange("chat")} />
+            <DashboardNavButton active={activeView === "director"} icon={LayoutGrid} label="Director" onClick={() => onViewChange("director")} />
+            <DashboardNavButton
+              active={activeView === "messages"}
+              icon={Inbox}
+              label="Mesaje"
+              badge={messageUnreadCount}
+              onClick={() => onViewChange("messages")}
+            />
+            <DashboardNavButton active={activeView === "profile"} icon={UserRound} label="Profil" onClick={() => onViewChange("profile")} />
+          </div>
         </div>
       </div>
     </header>
@@ -2001,11 +2103,13 @@ function DashboardNavButton({
   active,
   icon: Icon,
   label,
+  badge = 0,
   onClick,
 }: {
   active: boolean;
   icon: typeof MessageCircle;
   label: string;
+  badge?: number;
   onClick: () => void;
 }) {
   return (
@@ -2013,12 +2117,17 @@ function DashboardNavButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition",
+        "relative inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition",
         active ? "bg-[#4d6638] text-white shadow-sm" : "text-[#526047] hover:bg-[#f1eadb]",
       )}
     >
       <Icon className="h-4 w-4" />
       {label}
+      {badge > 0 ? (
+        <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -2040,20 +2149,23 @@ function DashboardStat({ icon: Icon, label, value }: { icon: typeof Wheat; label
 function MobileBottomNav({
   activeView,
   onViewChange,
+  messageUnreadCount = 0,
 }: {
   activeView: DashboardView;
   onViewChange: (view: DashboardView) => void;
+  messageUnreadCount?: number;
 }) {
-  const items: Array<{ id: DashboardView; label: string; icon: typeof MessageCircle }> = [
-    { id: "chat", label: "Chat", icon: MessageCircle },
+  const items: Array<{ id: DashboardView; label: string; icon: typeof MessageCircle; badge?: number }> = [
+    { id: "chat", label: "Asistent", icon: MessageCircle },
     { id: "director", label: "Director", icon: LayoutGrid },
+    { id: "messages", label: "Mesaje", icon: Inbox, badge: messageUnreadCount },
     { id: "profile", label: "Profil", icon: UserRound },
   ];
 
   return (
     <nav className="fixed inset-x-3 bottom-3 z-40 rounded-[24px] border border-[#d7ccb3] bg-[#fffaf0]/95 p-2 shadow-warm backdrop-blur md:hidden">
-      <div className="grid grid-cols-3 gap-1">
-        {items.map(({ id, label, icon: Icon }) => {
+      <div className="grid grid-cols-4 gap-1">
+        {items.map(({ id, label, icon: Icon, badge = 0 }) => {
           const active = activeView === id;
 
           return (
@@ -2062,12 +2174,17 @@ function MobileBottomNav({
               type="button"
               onClick={() => onViewChange(id)}
               className={cn(
-                "flex h-14 flex-col items-center justify-center gap-1 rounded-[18px] text-xs font-extrabold transition",
+                "relative flex h-14 flex-col items-center justify-center gap-1 rounded-[18px] text-[10px] font-extrabold transition",
                 active ? "bg-[#4d6638] text-white" : "text-[#526047] hover:bg-[#f1eadb]",
               )}
             >
               <Icon className="h-5 w-5" />
               {label}
+              {badge > 0 ? (
+                <span className="absolute right-2 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
+                  {badge > 9 ? "9+" : badge}
+                </span>
+              ) : null}
             </button>
           );
         })}
@@ -2145,6 +2262,7 @@ function MessageBubble({
   lead,
   status,
   failedFeedback,
+  isNewLead = false,
   onDetails,
   onMessage,
   onStatus,
@@ -2156,6 +2274,7 @@ function MessageBubble({
   lead?: Lead;
   status?: LeadStatus;
   failedFeedback?: string;
+  isNewLead?: boolean;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
@@ -2172,6 +2291,7 @@ function MessageBubble({
             lead={lead}
             status={status}
             failedFeedback={failedFeedback}
+            isNewLead={isNewLead}
             onDetails={onDetails}
             onMessage={onMessage}
             onStatus={onStatus}
@@ -2216,6 +2336,7 @@ function LeadCard({
   lead,
   status,
   failedFeedback,
+  isNewLead = false,
   onDetails,
   onMessage,
   onStatus,
@@ -2226,6 +2347,7 @@ function LeadCard({
   lead: Lead;
   status?: LeadStatus;
   failedFeedback?: string;
+  isNewLead?: boolean;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
@@ -2248,6 +2370,10 @@ function LeadCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="truncate text-base">{lead.name}</CardTitle>
+              {!isVenue && isNewLead ? (
+                <Badge variant="warm" className="shrink-0">Lead nou</Badge>
+              ) : null}
+              {!isVenue && lead.platformRegistered ? <PlatformRegisteredBadge /> : null}
               {lead.verified ? (
                 <Badge variant="olive" className="shrink-0">Verificat</Badge>
               ) : null}
@@ -2330,14 +2456,12 @@ function LeadCard({
               <span className="text-[#5a654f]">{lead.menuItems}</span>
             </div>
           )}
-          {lead.notes && (
-            <div className="sm:col-span-2 bg-[#fffbf2] border border-[#eadfca] rounded-xl p-2 mt-1">
-              <span className="font-bold text-[#33412c] block mb-0.5">
-                {isVenue ? "ℹ️ Detalii platformă:" : "ℹ️ AI Context:"}
-              </span>
+          {lead.notes && isVenue ? (
+            <div className="sm:col-span-2 rounded-xl border border-[#eadfca] bg-[#fffbf2] p-2 mt-1">
+              <span className="mb-0.5 block font-bold text-[#33412c]">ℹ️ Detalii platformă:</span>
               <span className="text-[#5a654f] italic">{lead.notes}</span>
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2418,9 +2542,10 @@ function LeadDetailsDialog({
   const Icon = leadIcon(lead.icon);
   const isPro = planTier === "pro";
   const pro = lead.proDetails;
-  const shortSources = isPro && pro?.sourceUrls.length ? pro.sourceUrls : lead.sourceUrls ?? [];
-  const shortNotes = isPro && pro?.notes ? pro.notes : lead.notes;
-  const shortMenu = isPro && pro?.menuItems ? pro.menuItems : lead.menuItems;
+  const sources = isPro && pro?.sourceUrls.length ? pro.sourceUrls : lead.sourceUrls ?? [];
+  const notes = isPro && pro?.notes ? pro.notes : lead.notes;
+  const menuText = isPro && pro?.menuItems ? pro.menuItems : lead.menuItems;
+  const reasonText = isPro && pro?.extendedReason ? pro.extendedReason : lead.reason;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -2435,7 +2560,7 @@ function LeadDetailsDialog({
                 <DialogTitle className="text-base font-extrabold leading-tight sm:text-lg">
                   {lead.name}
                 </DialogTitle>
-                {isPro ? <Badge variant="olive">Pro</Badge> : null}
+                {!isVenue && lead.platformRegistered ? <PlatformRegisteredBadge /> : null}
               </div>
               <DialogDescription className="mt-1 line-clamp-2 text-xs sm:text-sm">
                 {lead.type} · {lead.location}
@@ -2448,115 +2573,61 @@ function LeadDetailsDialog({
           </div>
         </DialogHeader>
 
-        <Tabs defaultValue="short" className="flex min-h-0 flex-1 flex-col">
-          <div className="shrink-0 overflow-x-auto px-4 pt-3 no-scrollbar sm:px-5">
-            <TabsList className="inline-flex h-auto w-max min-w-full justify-start gap-1 rounded-2xl bg-[#f3ecda] p-1">
-              <TabsTrigger value="short" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
-                Pe scurt
-              </TabsTrigger>
-              <TabsTrigger value="why" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
-                De ce
-              </TabsTrigger>
-              {isPro && pro ? (
-                <TabsTrigger value="pro" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
-                  Extra Pro
-                </TabsTrigger>
-              ) : null}
-              <TabsTrigger value="message" className="rounded-xl px-3 py-1.5 text-xs sm:text-sm">
-                Mesaj
-              </TabsTrigger>
-            </TabsList>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5 sm:py-4">
-            <TabsContent value="short" className="mt-0 space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2">
-                <DetailRow icon={MapPin} label="Distanță" value={lead.distance} />
-                <DetailRow icon={BadgeCheck} label="Potrivire" value={`${lead.match}%`} />
-                <DetailRow icon={CalendarDays} label="Moment bun" value={lead.bestDay} />
-                {lead.phone ? (
-                  <DetailRow
-                    icon={Phone}
-                    label="Telefon"
-                    value={lead.contactPerson ? `${lead.phone} · ${lead.contactPerson}` : lead.phone}
-                  />
-                ) : null}
-              </div>
-              {lead.website ? (
-                <DetailLinkRow icon={Globe} label="Website" href={normalizeUrl(lead.website)} text={lead.website} />
-              ) : null}
-              {shortMenu ? (
-                <InfoBlock
-                  title={isVenue ? "Produse disponibile" : "Meniu / ofertă"}
-                  text={shortMenu}
-                />
-              ) : null}
-              {shortNotes && !isVenue ? (
-                <InfoBlock title="Informații din surse web" text={shortNotes} collapsible />
-              ) : null}
-              {isVenue && shortNotes ? (
-                <InfoBlock title="Detalii platformă" text={shortNotes} />
-              ) : null}
-              {shortSources.length && !isVenue ? (
-                <SourceUrlsList urls={shortSources} title="Surse online" initialCount={3} />
-              ) : null}
-            </TabsContent>
-
-            <TabsContent value="why" className="mt-0 space-y-3">
-              <InfoBlock
-                title={isVenue ? "Recomand pentru că" : "Îl recomand pentru că"}
-                text={isPro && pro?.extendedReason ? pro.extendedReason : lead.reason}
+        <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3 sm:px-5 sm:py-4">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <DetailRow icon={CalendarDays} label="Moment bun" value={lead.bestDay} />
+            {lead.phone ? (
+              <DetailRow
+                icon={Phone}
+                label="Telefon"
+                value={lead.contactPerson ? `${lead.phone} · ${lead.contactPerson}` : lead.phone}
               />
-              {lead.needs?.length ? (
-                <InfoBlock
-                  title={isVenue ? "Produse oferite" : "Nevoi estimate"}
-                  text={lead.needs.join(", ")}
-                />
-              ) : null}
-              {(isPro && pro?.matchedNeeds?.length ? pro.matchedNeeds : lead.matchedNeeds)?.length ? (
-                <InfoBlock
-                  title={isVenue ? "Potrivire cu ce cauți" : "Potrivire cu produsele tale"}
-                  text={(isPro && pro?.matchedNeeds?.length ? pro.matchedNeeds : lead.matchedNeeds)!.join(", ")}
-                />
-              ) : null}
-              <InfoBlock title={isVenue ? "Oferă" : "Ai putea să-i vinzi"} text={lead.sell} />
-            </TabsContent>
-
-            {isPro && pro ? (
-              <TabsContent value="pro" className="mt-0 space-y-3">
-                {pro.statusTimeline.length ? <StatusTimeline steps={pro.statusTimeline} /> : null}
-                {pro.contactPerson ? (
-                  <DetailRow icon={UserRound} label="Persoană contact" value={pro.contactPerson} />
-                ) : null}
-                {pro.menuItems ? (
-                  <InfoBlock
-                    title={isVenue ? "Produse disponibile (extins)" : "Meniu / ofertă (extins)"}
-                    text={pro.menuItems}
-                  />
-                ) : null}
-                {pro.notes ? (
-                  <InfoBlock
-                    title={isVenue ? "Detalii platformă" : "Note din surse web"}
-                    text={pro.notes}
-                    collapsible={!isVenue}
-                  />
-                ) : null}
-                {pro.sourceUrls.length && !isVenue ? (
-                  <SourceUrlsList urls={pro.sourceUrls} title="Surse complete" initialCount={4} />
-                ) : null}
-              </TabsContent>
+            ) : isPro && pro?.contactPerson ? (
+              <DetailRow icon={UserRound} label="Persoană contact" value={pro.contactPerson} />
             ) : null}
-
-            <TabsContent value="message" className="mt-0">
-              <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-4">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-[#6b715f]">
-                  Mesaj sugerat
-                </p>
-                <p className="mt-2 text-sm leading-relaxed text-[#34422d]">{lead.contact}</p>
-              </div>
-            </TabsContent>
           </div>
-        </Tabs>
+
+          {lead.website ? (
+            <DetailLinkRow icon={Globe} label="Website" href={normalizeUrl(lead.website)} text={lead.website} />
+          ) : null}
+
+          <InfoBlock
+            title={isVenue ? "Recomand pentru că" : "Îl recomand pentru că"}
+            text={reasonText}
+            collapsible
+          />
+
+          <InfoBlock title={isVenue ? "Oferă" : "Ai putea să-i vinzi"} text={lead.sell} />
+
+          {menuText ? (
+            <InfoBlock
+              title={isVenue ? "Produse disponibile" : "Meniu / ofertă"}
+              text={menuText}
+              collapsible
+            />
+          ) : null}
+
+          {notes ? (
+            <InfoBlock
+              title={isVenue ? "Detalii platformă" : "Informații din surse web"}
+              text={notes}
+              collapsible={!isVenue}
+            />
+          ) : null}
+
+          {isPro && pro?.statusTimeline.length ? <StatusTimeline steps={pro.statusTimeline} /> : null}
+
+          {sources.length && !isVenue ? (
+            <SourceUrlsList urls={sources} title="Surse online" initialCount={3} />
+          ) : null}
+
+          <div className="rounded-2xl border border-[#ded5bf] bg-[#fffaf0] p-3.5">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-[#6b715f]">
+              Mesaj sugerat
+            </p>
+            <p className="mt-1.5 text-sm leading-relaxed text-[#34422d]">{lead.contact}</p>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

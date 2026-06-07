@@ -35,7 +35,7 @@ export function PlanSection({
           <p className="text-sm font-bold text-[#263421]">Plan & utilizare</p>
           <p className="mt-1 text-xs text-muted-foreground">
             {isPro
-              ? "Ai acces la toate funcțiile Pro (demo)."
+              ? "Lead-uri nelimitate — câte 10 rezultate per căutare (demo)."
               : "Plan gratuit — 3 recomandări pe săptămână."}
           </p>
         </div>
@@ -52,8 +52,8 @@ export function PlanSection({
           }
         />
         <UsageTile
-          label="Lead-uri active"
-          value={`${plan.usage.activeLeads}/${plan.limits.activeLeads}`}
+          label="Lead-uri în listă"
+          value={isPro ? `${plan.usage.activeLeads} (nelimitat)` : `${plan.usage.activeLeads}/${plan.limits.activeLeads}`}
         />
         <UsageTile
           label="Simulări săptămână"

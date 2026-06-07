@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { LayoutGrid, List, Loader2, MapPin, Search, SlidersHorizontal, Sparkles } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { LayoutGrid, List, Loader2, MapPin, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Lead, LeadStats, LeadStatus, PlanContext, ProducerProduct } from "@/lib/types";
+import type { Lead, LeadStatus, ProducerProduct } from "@/lib/types";
 import type { VenueMatchDiagnostics } from "@/lib/venueChatUtils";
+import { DirectorPipelineStats } from "@/components/DirectorPipelineStats";
 import { VenueMatchDiagnosticsPanel } from "@/components/VenueMatchDiagnosticsPanel";
-import { VenueStatsHeader } from "@/components/VenueStatsHeader";
 import { LeadMapPanel } from "@/pages/LeadMapPanel";
 
 type DistanceFilter = "all" | "10" | "25";
@@ -16,60 +15,7 @@ type SortKey = "match" | "distance" | "name" | "verified";
 type StatusFilter = "all" | LeadStatus;
 type RangeFilter = "all" | "inRange";
 type VerifiedFilter = "all" | "verifiedOnly";
-
-function StatsHeader({
-  plan,
-  stats,
-  isVenue,
-  onUpgrade,
-}: {
-  plan: PlanContext | null;
-  stats: LeadStats | null;
-  isVenue: boolean;
-  onUpgrade: () => void;
-}) {
-  if (isVenue || !plan) return null;
-
-  if (plan.tier !== "pro" || !stats) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-dashed border-[#d7ccb3] bg-[#fffaf0] px-3 py-2 lg:py-2.5">
-        <p className="text-xs text-[#5a654f] lg:text-sm">
-          Vezi pipeline și calitate match cu Pro.
-        </p>
-        <Button type="button" size="sm" variant="honey" onClick={onUpgrade} className="shrink-0">
-          <Sparkles className="h-3.5 w-3.5" />
-          Pro
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-2 rounded-2xl border border-[#c8d9aa] bg-[#f0f5e8] px-3 py-2 text-xs lg:py-2.5 lg:text-sm sm:grid-cols-3">
-      <StatPill
-        label="Pipeline"
-        value={`${stats.pipeline.Contactat ?? 0} contactat · ${stats.pipeline["A răspuns"] ?? 0} răspuns`}
-      />
-      <StatPill
-        label="Săptămâna asta"
-        value={`${stats.weekly.activeLeads}/${stats.weekly.activeLimit} active`}
-      />
-      <StatPill
-        label="Calitate"
-        value={`${stats.matchQuality.averageMatch}% · ${stats.matchQuality.averageDistanceKm} km`}
-      />
-    </div>
-  );
-}
-
-function StatPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-[10px] font-bold uppercase text-[#5a7150]">{label}</p>
-      <p className="font-semibold text-[#263421]">{value}</p>
-    </div>
-  );
-}
+type RegisteredFilter = "all" | "registeredOnly";
 
 function MobileViewToggle({
   panel,
@@ -121,11 +67,13 @@ function filterLeads(
   statuses: Record<string, LeadStatus>,
   rangeFilter: RangeFilter,
   verifiedFilter: VerifiedFilter,
+  registeredFilter: RegisteredFilter,
 ): Lead[] {
   return leads.filter((lead) => {
     if (type !== "all" && lead.icon !== type) return false;
     if (statusFilter !== "all" && statuses[lead.id] !== statusFilter) return false;
     if (verifiedFilter === "verifiedOnly" && !lead.verified) return false;
+    if (registeredFilter === "registeredOnly" && !lead.platformRegistered) return false;
     if (rangeFilter === "inRange" && lead.matchFactors && !lead.matchFactors.inRange) return false;
     if (product) {
       const hay = `${lead.sell} ${lead.reason} ${(lead.matchedNeeds ?? []).join(" ")} ${(lead.needs ?? []).join(" ")}`.toLowerCase();
@@ -201,10 +149,8 @@ export function DirectorPage({
   leads,
   statuses,
   failedFeedbacks,
-  activeLeadCount,
+  newLeadIds,
   searchingMore,
-  plan,
-  stats,
   products,
   productChips,
   isVenue,
@@ -212,7 +158,6 @@ export function DirectorPage({
   onVenueProducerScopeChange,
   onSearchMore,
   searchMoreLabel,
-  onUpgrade,
   onDetails,
   onMessage,
   onStatus,
@@ -224,10 +169,8 @@ export function DirectorPage({
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
   failedFeedbacks: Record<string, string>;
-  activeLeadCount: number;
+  newLeadIds?: Set<string>;
   searchingMore?: boolean;
-  plan: PlanContext | null;
-  stats: LeadStats | null;
   products: ProducerProduct[];
   productChips?: string[];
   isVenue: boolean;
@@ -235,7 +178,6 @@ export function DirectorPage({
   onVenueProducerScopeChange?: (scope: "matched" | "all") => void;
   onSearchMore?: () => void;
   searchMoreLabel?: string;
-  onUpgrade: () => void;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
@@ -253,6 +195,7 @@ export function DirectorPage({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [rangeFilter, setRangeFilter] = useState<RangeFilter>("all");
   const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
+  const [registeredFilter, setRegisteredFilter] = useState<RegisteredFilter>("all");
   const [isWideLayout, setIsWideLayout] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
   );
@@ -284,13 +227,13 @@ export function DirectorPage({
         statuses,
         rangeFilter,
         isVenue ? verifiedFilter : "all",
+        isVenue ? "all" : registeredFilter,
       ),
       sortKey,
     ),
-    [leads, distanceFilter, typeFilter, productFilter, statusFilter, statuses, rangeFilter, verifiedFilter, isVenue, sortKey],
+    [leads, distanceFilter, typeFilter, productFilter, statusFilter, statuses, rangeFilter, verifiedFilter, registeredFilter, isVenue, sortKey],
   );
 
-  const activeLimit = plan?.limits.activeLeads ?? activeLeadCount;
   const activeFilterCount =
     (distanceFilter !== "all" ? 1 : 0) +
     (!isVenue && typeFilter !== "all" ? 1 : 0) +
@@ -298,6 +241,7 @@ export function DirectorPage({
     (statusFilter !== "all" ? 1 : 0) +
     (isVenue && rangeFilter !== "all" ? 1 : 0) +
     (isVenue && verifiedFilter !== "all" ? 1 : 0) +
+    (!isVenue && registeredFilter !== "all" ? 1 : 0) +
     (sortKey !== "match" ? 1 : 0);
 
   const resetFilters = () => {
@@ -308,6 +252,7 @@ export function DirectorPage({
     setStatusFilter("all");
     setRangeFilter("all");
     setVerifiedFilter("all");
+    setRegisteredFilter("all");
   };
 
   const showMatchDiagnostics = isVenue && leads.length === 0 && matchDiagnostics;
@@ -315,35 +260,18 @@ export function DirectorPage({
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#fbf7ed]">
       <div className="sticky top-0 z-10 shrink-0 space-y-1.5 border-b border-[#d7ccb3] bg-[#fbf7ed] px-3 py-2 lg:px-4 lg:py-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="hidden items-center gap-2 text-base font-extrabold text-[#263421] lg:flex">
-              <LayoutGrid className="h-4 w-4" />
-              {isVenue ? "Director producători" : "Director lead-uri"}
-            </p>
-            <p className="text-xs text-muted-foreground lg:text-sm">
-              <span className="font-semibold text-[#263421]">
-                {filteredLeads.length} rezultate
-              </span>
-              <span className="hidden lg:inline">
-                {" "}
-                · {isVenue ? "Hartă, listă și filtre" : "Recomandări, hartă și statistici"}
-              </span>
-            </p>
-          </div>
-          <Badge variant="warm" className="shrink-0">
-            {isVenue ? leads.length : activeLeadCount}
-            {!isVenue && plan ? `/${activeLimit}` : ""} {isVenue ? "potriviți" : "active"}
-          </Badge>
+        <div className="min-w-0">
+          <p className="hidden items-center gap-2 text-base font-extrabold text-[#263421] lg:flex">
+            <LayoutGrid className="h-4 w-4" />
+            {isVenue ? "Director producători" : "Director lead-uri"}
+          </p>
+          <p className="text-xs text-muted-foreground lg:text-sm">
+            <span className="font-semibold text-[#263421]">{filteredLeads.length} rezultate</span>
+            <span className="hidden lg:inline"> · Hartă, listă și filtre</span>
+          </p>
         </div>
 
-        {isVenue ? (
-          <VenueStatsHeader leads={leads} statuses={statuses} />
-        ) : (
-          <div className="block">
-            <StatsHeader plan={plan} stats={stats} isVenue={isVenue} onUpgrade={onUpgrade} />
-          </div>
-        )}
+        <DirectorPipelineStats statuses={statuses} />
 
         <div className="flex flex-wrap items-center gap-2">
           {isVenue && onVenueProducerScopeChange ? (
@@ -442,7 +370,7 @@ export function DirectorPage({
             </FilterSection>
 
             <FilterSection label="Status">
-              {(["all", "Bun", "Contactat", "A răspuns", "Nu e potrivit"] as StatusFilter[]).map((value) => (
+              {(["all", "Contactat", "A răspuns", "A cumpărat", "Nu e potrivit"] as StatusFilter[]).map((value) => (
                 <FilterChip
                   key={value}
                   active={statusFilter === value}
@@ -467,7 +395,16 @@ export function DirectorPage({
                   <FilterChip active={rangeFilter === "inRange"} label="Livrare la mine" onClick={() => setRangeFilter("inRange")} />
                 </FilterSection>
               </>
-            ) : null}
+            ) : (
+              <FilterSection label="Înregistrat">
+                <FilterChip active={registeredFilter === "all"} label="Toate sursele" onClick={() => setRegisteredFilter("all")} />
+                <FilterChip
+                  active={registeredFilter === "registeredOnly"}
+                  label="Doar înregistrate"
+                  onClick={() => setRegisteredFilter("registeredOnly")}
+                />
+              </FilterSection>
+            )}
 
             {activeFilterCount > 0 ? (
               <button
@@ -504,6 +441,7 @@ export function DirectorPage({
         leads={filteredLeads}
         statuses={statuses}
         failedFeedbacks={failedFeedbacks}
+        newLeadIds={newLeadIds}
         activeLeadCount={filteredLeads.length}
         onDetails={onDetails}
         onMessage={onMessage}

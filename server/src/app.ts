@@ -11,6 +11,7 @@ import { producersRouter } from "./modules/producers/producer.routes.js";
 import { venuesRouter } from "./modules/venues/venue.routes.js";
 import { accountRouter } from "./modules/account/account.routes.js";
 import { adminRouter } from "./modules/admin/admin.routes.js";
+import { messagesRouter } from "./modules/messages/messages.routes.js";
 
 export function createApp() {
   const app = express();
@@ -35,6 +36,7 @@ export function createApp() {
   app.use("/api/leads", leadsRouter);
   app.use("/api/geo", geoRouter);
   app.use("/api/ai", aiProxyRouter);
+  app.use("/api/messages", messagesRouter);
 
   app.use(errorHandler);
 

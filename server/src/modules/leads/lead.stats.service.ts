@@ -95,7 +95,7 @@ export async function getLeadStatsForUser(userId: string, accountType?: string) 
       discoveredThisWeek: plan.usage.weeklyDiscoveries,
       weeklyLimit: plan.tier === "pro" ? null : plan.limits.weeklyDiscoveries,
       activeLeads: activeCount,
-      activeLimit: plan.limits.activeLeads,
+      activeLimit: plan.tier === "pro" ? null : plan.limits.activeLeads,
     },
     matchQuality: {
       averageMatch: leads.length ? Math.round(matchSum / leads.length) : 0,

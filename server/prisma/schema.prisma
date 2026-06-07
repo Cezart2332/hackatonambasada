@@ -39,6 +39,7 @@ model User {
   venueProfile              VenueProfile?
   leadStatuses              LeadStatusRecord[]
   producerMatchStatuses     ProducerMatchStatusRecord[]
+  venueLeadStatuses         VenueLeadStatusRecord[] @relation("VenueLeadTargets")
   usageQuotas               UsageQuota[]
 
   @@map("user")
@@ -154,10 +155,28 @@ model VenueProfile {
   latitude        Float?
   longitude       Float?
   approvalStatus  ApprovalStatus @default(PENDING)
+  productsNeeded  String         @default("")
+  supplyFrequency String         @default("")
+  preferredDays   String         @default("")
+  needsUpdatedAt  DateTime?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
+  searchHistory   VenueSearchHistory[]
 
   @@map("venue_profile")
+}
+
+model VenueSearchHistory {
+  id              String       @id @default(cuid())
+  venueUserId     String
+  venueProfile    VenueProfile @relation(fields: [venueUserId], references: [userId], onDelete: Cascade)
+  productsNeeded  String       @default("")
+  supplyFrequency String       @default("")
+  preferredDays   String       @default("")
+  createdAt       DateTime     @default(now())
+
+  @@index([venueUserId, createdAt])
+  @@map("venue_search_history")
 }
 
 model ProducerProduct {
@@ -209,6 +228,19 @@ model ProducerMatchStatusRecord {
   @@map("producer_match_status_record")
 }
 
+model VenueLeadStatusRecord {
+  id             String     @id @default(cuid())
+  producerUserId String
+  venueUserId    String
+  venueUser      User       @relation("VenueLeadTargets", fields: [venueUserId], references: [id], onDelete: Cascade)
+  status         LeadStatus
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([producerUserId, venueUserId])
+  @@map("venue_lead_status_record")
+}
+
 model LeadStatusRecord {
   id        String     @id @default(cuid())
   leadId    String
@@ -221,4 +253,41 @@ model LeadStatusRecord {
 
   @@unique([leadId, userId])
   @@map("lead_status_record")
+}
+
+model DirectConversation {
+  id             String   @id @default(cuid())
+  producerUserId String
+  venueUserId    String
+  lastMessageAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  messages       DirectMessage[]
+  reads          DirectConversationRead[]
+
+  @@unique([producerUserId, venueUserId])
+  @@map("direct_conversation")
+}
+
+model DirectMessage {
+  id             String             @id @default(cuid())
+  conversationId String
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderUserId   String
+  body           String
+  createdAt      DateTime           @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("direct_message")
+}
+
+model DirectConversationRead {
+  id             String             @id @default(cuid())
+  conversationId String
+  conversation   DirectConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  lastReadAt     DateTime           @default(now())
+
+  @@unique([conversationId, userId])
+  @@map("direct_conversation_read")
 }

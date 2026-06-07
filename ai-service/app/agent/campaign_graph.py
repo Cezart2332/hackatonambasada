@@ -10,14 +10,21 @@ from langgraph.graph import END, StateGraph
 from app.agent.llm import get_chat_model
 from app.agent.outreach_agent import draft_outreach_message
 from app.config import get_settings
+from app.services.unipile_delivery import send_campaign_test_messages, summarize_delivery
 
 logger = logging.getLogger(__name__)
 
-SIMULATED_ACTION = "SIMULARE — mesaj generat, nicio trimitere reală"
-DISCLAIMER = "SIMULARE — niciun mesaj WhatsApp/email nu a fost trimis."
+SIMULATED_ACTION = "SIMULARE — mesaj generat si livrat catre recipientii demo configurati"
+DISCLAIMER = (
+    "SIMULARE — mesajele sunt trimise doar catre numerele si emailurile demo configurate, "
+    "nu catre lead-urile reale."
+)
 
 
 class CampaignState(TypedDict):
+    user_id: str
+    sender_email: str
+    sender_phone: str
     leads: list[dict[str, Any]]
     product_summary: str
     locality: str
@@ -87,14 +94,24 @@ def process_lead_node(state: CampaignState) -> dict:
         draft=draft,
         product_summary=state["product_summary"],
     )
+    deliveries = send_campaign_test_messages(
+        lead_name=str(lead.get("name") or "Lead"),
+        draft=draft,
+        product_summary=state["product_summary"],
+        locality=state["locality"],
+        user_id=state["user_id"],
+        sender_email=state["sender_email"],
+        sender_phone=state["sender_phone"],
+    )
 
     step = {
         "leadId": lead.get("id") or f"lead-{idx}",
         "leadName": lead.get("name") or "Lead",
         "draftMessage": draft,
         "simulatedOutcome": outcome["outcome"],
-        "simulatedAction": SIMULATED_ACTION,
+        "simulatedAction": f"{SIMULATED_ACTION}. {summarize_delivery(deliveries)}",
         "reasoning": outcome["reasoning"],
+        "deliveries": deliveries,
     }
     steps = list(state["steps"])
     steps.append(step)
@@ -120,13 +137,16 @@ _campaign_graph = None
 
 def run_campaign_simulation(
     *,
+    user_id: str,
     leads: list[dict[str, Any]],
     product_summary: str,
     locality: str,
     tone: str = "cald, direct",
     max_leads: int = 5,
+    sender_email: str = "",
+    sender_phone: str = "",
 ) -> list[dict[str, Any]]:
-    """Dry-run campaign: draft + simulated outcome per lead. No real sends."""
+    """Simulate campaign outcomes and send each draft only to configured demo recipients."""
     batch = leads[:max_leads]
     if not batch:
         return []
@@ -136,6 +156,9 @@ def run_campaign_simulation(
         _campaign_graph = _build_campaign_graph()
 
     initial: CampaignState = {
+        "user_id": user_id,
+        "sender_email": sender_email,
+        "sender_phone": sender_phone,
         "leads": batch,
         "product_summary": product_summary or "produse locale",
         "locality": locality or "Dobrogea",

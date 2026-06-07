@@ -139,6 +139,26 @@ class GeocodingTests(unittest.TestCase):
             calls,
         )
 
+    def test_county_prefix_is_stripped_from_queries(self) -> None:
+        queries = geocode._build_geocode_queries(
+            "La Grisha",
+            "Str. Primăverii, nr. 2, Ghindărești, Județul Constanța, Romania",
+            "Ghindărești",
+        )
+        self.assertIn("La Grisha, Strada Primăverii, 2, Ghindărești, Constanța, Romania", queries)
+        self.assertIn("Strada Primăverii, 2, Ghindărești, Constanța, Romania", queries)
+        self.assertTrue(all("Județul" not in query for query in queries))
+        self.assertTrue(all("județul" not in query for query in queries))
+
+    def test_address_needs_enrichment_for_vague_addresses(self) -> None:
+        from app.agent.discovery_graph import _address_needs_enrichment
+        self.assertTrue(_address_needs_enrichment("Constanța, Romania", "Constanța"))
+        self.assertTrue(_address_needs_enrichment("Constanţa, RO", "Constanța"))
+        self.assertTrue(_address_needs_enrichment("Județul Constanța, România", "Constanța"))
+        self.assertTrue(_address_needs_enrichment("Ghindărești", "Ghindărești"))
+        self.assertFalse(_address_needs_enrichment("Strada Primăverii, nr. 2, Ghindărești", "Ghindărești"))
+        self.assertFalse(_address_needs_enrichment("Bulevardul Tomis, 49A, Constanța", "Constanța"))
+
     def test_wrong_city_result_is_rejected_for_specific_locality(self) -> None:
         result = geocode._pick_romania_result(
             [

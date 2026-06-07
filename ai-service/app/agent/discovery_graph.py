@@ -69,7 +69,6 @@ def _address_needs_enrichment(address: str, locality: str) -> bool:
         return True
 
     lower = clean.lower()
-    locality_lower = (locality or "").strip().lower()
     weak_markers = {
         "locație aproximativă",
         "locatie aproximativa",
@@ -91,9 +90,19 @@ def _address_needs_enrichment(address: str, locality: str) -> bool:
         return True
     if len(clean) < 16:
         return True
-    if locality_lower and lower.strip(" ,") in {locality_lower, f"{locality_lower}, românia", f"{locality_lower}, romania"}:
+
+    from app.geocode import _normalize_address, _STREET_PREFIXES
+    norm = _normalize_address(clean, locality)
+    if not norm or len(norm) <= 6:
         return True
-    return "," not in clean and not any(char.isdigit() for char in clean)
+
+    # If it has no digit and no street prefix, it needs enrichment
+    has_digit = any(char.isdigit() for char in norm)
+    has_street = bool(_STREET_PREFIXES.search(norm))
+    if not has_digit and not has_street:
+        return True
+
+    return False
 
 
 class DiscoveryState(TypedDict):

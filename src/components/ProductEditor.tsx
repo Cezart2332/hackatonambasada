@@ -13,6 +13,7 @@ import {
   normalizeLegacyProduct,
   resolveBaseUnitsForProduct,
   type ProductCategoryId,
+  inferCategoryFromName,
 } from "@/lib/productCatalog";
 import {
   defaultAvailableFromDate,
@@ -25,7 +26,8 @@ const selectClassName =
   "flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
 
 export function createProduct(overrides: Partial<ProducerProduct> = {}): ProducerProduct {
-  const categoryDefaults = defaultProductFieldsForCategory("legume_fructe");
+  const categoryId = overrides.category || (overrides.name ? inferCategoryFromName(overrides.name) : "legume_fructe");
+  const categoryDefaults = defaultProductFieldsForCategory(categoryId as ProductCategoryId);
   return {
     id: crypto.randomUUID(),
     name: "",
@@ -33,6 +35,7 @@ export function createProduct(overrides: Partial<ProducerProduct> = {}): Produce
     pricePerKg: "",
     availableFrom: defaultAvailableFromDate(),
     ...categoryDefaults,
+    category: categoryId,
     ...overrides,
     unit:
       overrides.unit ??
@@ -49,6 +52,28 @@ export function patchProducerProduct(
   patch: Partial<ProducerProduct>,
 ): ProducerProduct {
   const next = { ...product, ...patch };
+
+  if (patch.name !== undefined && !patch.category) {
+    const oldInferred = inferCategoryFromName(product.name);
+    const isDefaultOrInferred =
+      !product.category ||
+      product.category === oldInferred ||
+      (product.category === "legume_fructe" && !product.name.trim());
+
+    if (isDefaultOrInferred) {
+      const newCategory = inferCategoryFromName(patch.name);
+      if (newCategory !== product.category) {
+        const defaults = defaultProductFieldsForCategory(newCategory);
+        Object.assign(next, defaults);
+        next.category = newCategory;
+        next.name = patch.name;
+        if (patch.estimatedQuantity !== undefined) next.estimatedQuantity = patch.estimatedQuantity;
+        if (patch.pricePerKg !== undefined) next.pricePerKg = patch.pricePerKg;
+        if (patch.availableFrom !== undefined) next.availableFrom = patch.availableFrom;
+      }
+    }
+  }
+
   const categoryId = (next.category || "legume_fructe") as ProductCategoryId;
 
   if (patch.category && patch.category !== product.category) {
@@ -128,14 +153,11 @@ export function InventoryLineEditor({
       return;
     }
     const next = patchProducerProduct(activeProduct, patch);
-    (Object.keys(patch) as Array<keyof ProducerProduct>).forEach((key) => {
+    (Object.keys(next) as Array<keyof ProducerProduct>).forEach((key) => {
       if (next[key] !== activeProduct[key]) {
         onUpdate(product.id, key, String(next[key] ?? ""));
       }
     });
-    if (next.unit !== activeProduct.unit) {
-      onUpdate(product.id, "unit", next.unit);
-    }
   }
 
   const priceLabel = `Preț / ${getPriceUnitShort(activeProduct.baseUnit)}`;
@@ -180,7 +202,7 @@ export function InventoryLineEditor({
         <InlineField label="Nume produs">
           <Input
             value={activeProduct.name}
-            onChange={(event) => onUpdate(product.id, "name", event.target.value)}
+            onChange={(event) => applyPatch({ name: event.target.value })}
             placeholder="Ex: roșii cherry, miere de salcâm"
             className="h-10 rounded-xl"
           />

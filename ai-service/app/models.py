@@ -12,7 +12,7 @@ class HealthResponse(BaseModel):
 class ChatProfileSnapshot(BaseModel):
     product: str = ""
     quantity: str = ""
-    products: list[str] = Field(default_factory=list)
+    products: list[Any] = Field(default_factory=list)
     location: str = ""
     latitude: float | None = None
     longitude: float | None = None
@@ -63,6 +63,8 @@ class CampaignSimulateRequest(BaseModel):
     locality: str = ""
     tone: str = "cald, direct"
     maxLeads: int = 5
+    senderEmail: str = ""
+    senderPhone: str = ""
 
 
 class SimulatedStep(BaseModel):
@@ -72,6 +74,7 @@ class SimulatedStep(BaseModel):
     simulatedOutcome: str
     simulatedAction: str
     reasoning: str = ""
+    deliveries: list[dict[str, str]] = Field(default_factory=list)
 
 
 class CampaignSimulateResponse(BaseModel):
@@ -241,3 +244,26 @@ class SupplierStatusRequest(BaseModel):
     supplierId: str
     status: str
     reason: str | None = None
+
+
+class LeadOutreachRequest(BaseModel):
+    userId: str
+    leadName: str = ""
+    companyName: str = ""
+    phone: str = ""
+    email: str = ""
+    context: str = ""
+    preferredChannel: str = ""
+    mode: str = "draft"
+
+
+class LeadOutreachResponse(BaseModel):
+    mode: str = "draft"
+    channel: str = ""
+    recipient: str = ""
+    subject: str = ""
+    message: str = ""
+    analysis: str = ""
+    sent: bool = False
+    sendResult: dict[str, Any] = Field(default_factory=dict)
+    model: str = "openrouter"

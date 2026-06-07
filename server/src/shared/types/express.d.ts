@@ -14,6 +14,7 @@ declare global {
         query?: unknown;
         params?: unknown;
       };
+      rawBody?: Buffer;
     }
   }
 }

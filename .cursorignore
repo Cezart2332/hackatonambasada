@@ -10,10 +10,7 @@ skills-lock.json
 # TypeScript build cache
 *.tsbuildinfo
 
-# Logs & env
-*.log
-.env
-.env.*
+
 
 # Editor / OS noise
 .vscode/

@@ -32,6 +32,8 @@ from app.models import (
     CampaignSimulateResponse,
     SimulatedStep,
     SupplierStatusRequest,
+    LeadOutreachRequest,
+    LeadOutreachResponse,
 )
 from app.services.matching import discover_leads, list_discovered_leads, update_buyer_status
 from app.services.supplier_matching import (
@@ -41,6 +43,7 @@ from app.services.supplier_matching import (
 )
 from app.agent.outreach_agent import draft_outreach_message
 from app.agent.campaign_graph import DISCLAIMER, run_campaign_simulation
+from app.agent.lead_outreach_graph import run_lead_outreach
 
 logger = logging.getLogger(__name__)
 
@@ -155,11 +158,14 @@ def campaign_simulate(body: CampaignSimulateRequest) -> CampaignSimulateResponse
     try:
         lead_dicts = [lead.model_dump() for lead in body.leads]
         steps = run_campaign_simulation(
+            user_id=body.userId,
             leads=lead_dicts,
             product_summary=body.productSummary,
             locality=body.locality,
             tone=body.tone,
             max_leads=body.maxLeads,
+            sender_email=body.senderEmail,
+            sender_phone=body.senderPhone,
         )
         return CampaignSimulateResponse(
             steps=[SimulatedStep(**step) for step in steps],
@@ -172,6 +178,36 @@ def campaign_simulate(body: CampaignSimulateRequest) -> CampaignSimulateResponse
             status_code=502,
             detail="Simularea campaniei nu a putut rula acum.",
         ) from exc
+
+
+@app.post("/v1/lead-outreach", response_model=LeadOutreachResponse)
+def lead_outreach(body: LeadOutreachRequest) -> LeadOutreachResponse:
+    settings = get_settings()
+    if not body.userId:
+        raise HTTPException(status_code=422, detail="userId este obligatoriu.")
+    if not body.context.strip():
+        raise HTTPException(status_code=422, detail="context este obligatoriu.")
+
+    try:
+        result = run_lead_outreach(
+            user_id=body.userId,
+            lead_name=body.leadName,
+            company_name=body.companyName,
+            phone=body.phone,
+            email=body.email,
+            context=body.context,
+            preferred_channel=body.preferredChannel,
+            mode=body.mode or "draft",
+        )
+        return LeadOutreachResponse(**result, model=settings.openrouter_model)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "Lipsește phone sau email" in message:
+            raise HTTPException(status_code=422, detail=message) from exc
+        raise HTTPException(status_code=502, detail=message) from exc
+    except Exception as exc:
+        logger.exception("Lead outreach failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Outreach AI nu a putut rula acum.") from exc
 
 
 @app.post("/v1/leads/enrich", response_model=LeadEnrichResponse)

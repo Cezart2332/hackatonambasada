@@ -78,6 +78,17 @@ services:
       backend:
         condition: service_healthy
 
+  # Exposes backend only (not frontend) via a public trycloudflare.com URL for Unipile webhooks.
+  # TODO: copy the URL from `docker compose logs -f cloudflared` into Unipile dashboard:
+  #       https://<your-subdomain>.trycloudflare.com/webhooks/unipile
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://backend:3001
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   warmleads_pg:
 

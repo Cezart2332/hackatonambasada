@@ -122,6 +122,9 @@ def discover_leads(
     force_refresh: bool = False,
     discover_more: bool = False,
 ) -> dict[str, Any]:
+    # Enforce returning at most 3 leads, even if more are stored/cached in the database
+    limit = min(limit, 3)
+
     settings = get_settings()
     producer_needs = normalize_producer_products(products)
     if not producer_needs:

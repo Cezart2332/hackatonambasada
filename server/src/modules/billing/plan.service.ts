@@ -273,7 +273,7 @@ export async function downgradeToFree(userId: string) {
 export function discoveryLimitForPlan(ctx: PlanContext): number {
   const remainingActive = Math.max(0, ctx.limits.activeLeads - ctx.usage.activeLeads);
   if (ctx.tier === "pro") {
-    return Math.min(remainingActive, 5);
+    return Math.min(remainingActive, 3);
   }
   const remainingWeekly = Math.max(
     0,

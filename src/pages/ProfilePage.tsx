@@ -1,8 +1,11 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Loader2,
   Check,
   Plus,
+  MessageCircle,
+  Mail,
+  Link2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +15,8 @@ import { FieldBlock, RangeKmInput } from "@/components/FormBlocks";
 import { InventoryLineEditor } from "@/components/ProductEditor";
 import { LogoutSection } from "@/components/LogoutSection";
 import { PlanSection } from "@/components/PlanSection";
-import type { PlanContext, Profile, ProducerProduct } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { PlanContext, Profile, ProducerProduct, UnipileIntegrationsStatus } from "@/lib/types";
 
 function ProfileProducts({
   products,
@@ -53,6 +57,131 @@ function ProfileProducts({
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+function integrationStatusLabel(status: string, connected: boolean): string {
+  if (connected) return "Conectat";
+  if (status === "PENDING") return "În curs";
+  if (status === "ERROR") return "Eroare";
+  return "Neconectat";
+}
+
+function UnipileIntegrationsSection() {
+  const [integrations, setIntegrations] = useState<UnipileIntegrationsStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [connecting, setConnecting] = useState<"whatsapp" | "gmail" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const result = await api.getUnipileIntegrations();
+      setIntegrations(result);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nu am putut încărca integrările.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  const handleConnect = async (provider: "whatsapp" | "gmail") => {
+    setConnecting(provider);
+    setError(null);
+    try {
+      const { url } = await api.connectUnipile(provider);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => void refresh(), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Conectarea a eșuat.");
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const rows = [
+    {
+      key: "whatsapp" as const,
+      label: "WhatsApp",
+      icon: MessageCircle,
+      status: integrations?.whatsapp,
+    },
+    {
+      key: "gmail" as const,
+      label: "Gmail",
+      icon: Mail,
+      status: integrations?.gmail,
+    },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-[#263421]">Mesagerie campanie</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Conectează WhatsApp și Gmail ca simularea să trimită mesaje demo din contul tău.
+          </p>
+        </div>
+        <Link2 className="mt-0.5 h-4 w-4 shrink-0 text-[#6b7d5a]" />
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {rows.map(({ key, label, icon: Icon, status }) => {
+          const connected = Boolean(status?.connected);
+          const statusLabel = status ? integrationStatusLabel(status.status, connected) : "—";
+          return (
+            <div
+              key={key}
+              className="flex flex-col gap-3 rounded-xl border border-[#eadfca] bg-white/70 p-3 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#eef3e8] text-[#405235]">
+                  <Icon className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[#263421]">{label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {loading ? "Se verifică..." : statusLabel}
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant={connected ? "outline" : "honey"}
+                size="sm"
+                disabled={loading || connecting === key}
+                onClick={() => void handleConnect(key)}
+              >
+                {connecting === key ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : connected ? (
+                  "Reconectează"
+                ) : (
+                  `Conectează ${label}`
+                )}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-3 text-xs text-muted-foreground">
+        Simularea trimite doar către numerele demo 0775313878, 0736671759, 0742557626 și emailurile
+        cezarturliu25@gmail.com, cezarturliu245@gmail.com, nicolae.andrei888@gmail.com.
+      </p>
+      {error ? <p className="mt-2 text-xs font-medium text-[#884636]">{error}</p> : null}
     </div>
   );
 }
@@ -185,6 +314,8 @@ export function ProfilePage({
                 </div>
               </div>
             </div>
+
+            <UnipileIntegrationsSection />
           </div>
 
           <div className="rounded-2xl border border-[#d7ccb3] bg-[#fffaf0] p-4">

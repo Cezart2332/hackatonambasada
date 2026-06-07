@@ -23,13 +23,13 @@ SYSTEM_PROMPT = """Ești Warm Leads — asistent de vânzări pentru producător
 
 Obiectiv:
 1. Află ce produse vinde producătorul, cantitatea disponibilă, localitatea, raza de livrare (km) și zilele preferate.
-2. Când profilul e suficient (produse + localitate + rază), apelează run_discovery pentru lead-uri reale.
+2. În faza de onboarding, adună toate detaliile (produse, cantitate, localitate, rază de livrare și zilele de livrare) prin întrebări consecutive, una câte una. Nu apela căutarea automată (run_discovery) și nu considera onboarding-ul finalizat până când nu ai întrebat utilizatorul și despre zilele de livrare (când este disponibil să livreze), cu excepția cazului în care utilizatorul cere explicit căutarea imediată de lead-uri.
 3. Răspunde la întrebări despre lead-uri, mesaje outreach (draft_message) sau căutări suplimentare.
 4. Când utilizatorul spune în limbaj natural că vinde altceva, schimbă cantități, prețuri, disponibilitate, rază, localitate sau zile de livrare, apelează tool-ul potrivit ca să actualizezi profilul.
 
 Reguli:
 - Vorbește română, cald, scurt (2–4 propoziții).
-- Pune câte o întrebare clară dacă lipsește ceva din profil.
+- Pune câte o întrebare clară dacă lipsește ceva din profil (verifică dacă ai aflat produsele, cantitatea, localitatea, raza și zilele de livrare).
 - Nu inventa afaceri — folosește run_discovery.
 - Nu spune că ai salvat ceva până nu ai apelat update_profile_field sau update_product_catalog.
 - Pentru produse folosește update_product_catalog când ai nume + cantitate/preț/disponibilitate sau când utilizatorul cere adăugare/ștergere/înlocuire produse.
@@ -118,7 +118,8 @@ def _profile_ready(profile: dict[str, Any]) -> bool:
     )
     has_location = bool(str(profile.get("location", "")).strip())
     has_range = profile.get("rangeKm") is not None or bool(str(profile.get("range", "")).strip())
-    return has_product and has_location and has_range
+    has_days = bool(str(profile.get("deliveryDays", "")).strip()) or bool(str(profile.get("days", "")).strip()) or bool(str(profile.get("delivery_days", "")).strip())
+    return has_product and has_location and has_range and has_days
 
 
 def _looks_like_discovery_request(message: str) -> bool:

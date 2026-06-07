@@ -13,6 +13,7 @@ import type {
   ProducerSetup,
   Profile,
   SimulatedCampaignStep,
+  UnipileIntegrationsStatus,
   VenueSetup,
 } from "./types";
 
@@ -506,6 +507,15 @@ export const api = {
     apiFetch<{ userId: string; verified: boolean }>(`/api/admin/producers/${userId}/verified`, {
       method: "PUT",
       body: JSON.stringify({ verified }),
+    }),
+
+  getUnipileIntegrations: () =>
+    apiFetch<UnipileIntegrationsStatus>("/api/integrations/unipile/status"),
+
+  connectUnipile: (provider: "whatsapp" | "gmail") =>
+    apiFetch<{ url: string }>("/api/integrations/unipile/connect", {
+      method: "POST",
+      body: JSON.stringify({ provider }),
     }),
 
 };

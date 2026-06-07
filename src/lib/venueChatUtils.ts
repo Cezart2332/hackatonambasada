@@ -160,25 +160,49 @@ export function isVenueNeedsMessage(text: string): boolean {
   return /nevoie|caut[aă]|produc[aă]tor|furnizor|aprovizion|g[aă]se[sș]te|arat[aă]|list[aă]|vreau|miere|lapte|branz|brânz|legum|ou[aă]|vin/i.test(text);
 }
 
+export function formatVenueMatchDiagnosticsSummary(diagnostics: VenueMatchDiagnostics): string {
+  return [
+    `${diagnostics.totalApproved} producător${diagnostics.totalApproved === 1 ? "" : "i"} aprobați`,
+    `${diagnostics.productRelevant} cu produs potrivit`,
+    `${diagnostics.inRange} în rază`,
+  ].join(" · ");
+}
+
+export function buildVenueMatchDiagnosticsHint(
+  diagnostics: VenueMatchDiagnostics,
+  productLabel?: string,
+  scope: "matched" | "all" = "matched",
+): string {
+  const label = productLabel?.trim() || "ce cauți";
+  if (diagnostics.totalApproved === 0) {
+    return "Platforma nu are încă producători aprobați.";
+  }
+  if (diagnostics.outOfRangeOnly > 0 && diagnostics.inRange === 0) {
+    return `Există ${diagnostics.outOfRangeOnly} producător(i) cu ${label}, dar nu livrează la distanța ta.`;
+  }
+  if (diagnostics.noProductMatch > 0 && diagnostics.productRelevant === 0) {
+    return `Niciun producător înregistrat nu oferă ${label} acum.`;
+  }
+  if (scope === "matched" && diagnostics.productRelevant > 0 && diagnostics.inRange === 0) {
+    return "Producători cu produs potrivit există, dar niciunul nu e în raza de livrare.";
+  }
+  return `Nu am găsit producători potriviți pentru ${label} în raza selectată.`;
+}
+
 export function buildVenueZeroMatchMessage(
   productLabel: string,
-  diagnostics?: {
-    totalApproved: number;
-    productRelevant: number;
-    inRange: number;
-    outOfRangeOnly: number;
-    noProductMatch: number;
-  },
+  diagnostics?: VenueMatchDiagnostics,
 ): string {
   if (!diagnostics) {
     return `Nu am găsit producători potriviți pentru ${productLabel} în raza de livrare. Deschide tab-ul Director pentru lista completă sau spune alt produs.`;
   }
-  if (diagnostics.totalApproved === 0) return "Platforma nu are încă producători aprobați.";
+  const hint = buildVenueMatchDiagnosticsHint(diagnostics, productLabel);
+  if (diagnostics.totalApproved === 0) return hint;
   if (diagnostics.outOfRangeOnly > 0 && diagnostics.inRange === 0) {
-    return `Există ${diagnostics.outOfRangeOnly} producător(i) cu ${productLabel}, dar nu livrează la distanța ta. Deschide tab-ul Director pentru lista completă.`;
+    return `${hint} Deschide tab-ul Director pentru lista completă.`;
   }
   if (diagnostics.noProductMatch > 0 && diagnostics.productRelevant === 0) {
-    return `Niciun producător înregistrat nu oferă ${productLabel} acum. Deschide tab-ul Director sau spune alt produs.`;
+    return `${hint} Deschide tab-ul Director sau spune alt produs.`;
   }
-  return `Nu am găsit producători potriviți pentru ${productLabel} în raza de livrare. Deschide tab-ul Director pentru lista completă.`;
+  return `${hint} Deschide tab-ul Director pentru lista completă.`;
 }

@@ -166,29 +166,18 @@ export async function listLeadsForUser(userId: string, accountType?: string) {
   const plan = await getPlanContext(userId, accountType);
 
   const aiListed = await listDiscoveredLeads(userId, latitude, longitude);
-  if (aiListed?.length) {
-    return aiListed.map((lead) =>
-      mapLeadForPlan(
-        {
-          ...mapDiscoveredLeadToDto(lead),
-          status: lead.status ?? null,
-        },
-        plan.tier,
-        lead.status,
-      ),
-    );
-  }
+  if (!aiListed?.length) return [];
 
-  try {
-    const discovered = await matchForUser(userId, {}, accountType);
-    if (discovered?.length) {
-      return discovered.map((lead) => ({ ...lead, status: null }));
-    }
-  } catch {
-    return [];
-  }
-
-  return [];
+  return aiListed.map((lead) =>
+    mapLeadForPlan(
+      {
+        ...mapDiscoveredLeadToDto(lead),
+        status: lead.status ?? null,
+      },
+      plan.tier,
+      lead.status,
+    ),
+  );
 }
 
 export async function getLeadById(userId: string, leadId: string, accountType?: string) {

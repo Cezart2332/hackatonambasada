@@ -501,7 +501,7 @@ export function LeadMapPanel({
             </p>
           </div>
           <Badge variant="warm">
-            {activeLeadCount} {isVenue ? "activi" : "active"}
+            {activeLeadCount} {isVenue ? "potriviți" : "active"}
           </Badge>
         </div>
         {onSearchMore ? (

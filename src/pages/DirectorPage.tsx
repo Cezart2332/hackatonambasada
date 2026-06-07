@@ -4,15 +4,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Lead, LeadStats, LeadStatus, PlanContext, ProducerProduct } from "@/lib/types";
+import type { VenueMatchDiagnostics } from "@/lib/venueChatUtils";
+import { VenueMatchDiagnosticsPanel } from "@/components/VenueMatchDiagnosticsPanel";
 import { VenueStatsHeader } from "@/components/VenueStatsHeader";
 import { LeadMapPanel } from "@/pages/LeadMapPanel";
 
 type DistanceFilter = "all" | "10" | "25";
 type TypeFilter = "all" | "restaurant" | "hotel" | "cafe" | "shop" | "deli";
 type MobilePanel = "list" | "map";
-type SortKey = "match" | "distance" | "name";
+type SortKey = "match" | "distance" | "name" | "verified";
 type StatusFilter = "all" | LeadStatus;
 type RangeFilter = "all" | "inRange";
+type VerifiedFilter = "all" | "verifiedOnly";
 
 function StatsHeader({
   plan,
@@ -117,10 +120,12 @@ function filterLeads(
   statusFilter: StatusFilter,
   statuses: Record<string, LeadStatus>,
   rangeFilter: RangeFilter,
+  verifiedFilter: VerifiedFilter,
 ): Lead[] {
   return leads.filter((lead) => {
     if (type !== "all" && lead.icon !== type) return false;
     if (statusFilter !== "all" && statuses[lead.id] !== statusFilter) return false;
+    if (verifiedFilter === "verifiedOnly" && !lead.verified) return false;
     if (rangeFilter === "inRange" && lead.matchFactors && !lead.matchFactors.inRange) return false;
     if (product) {
       const hay = `${lead.sell} ${lead.reason} ${(lead.matchedNeeds ?? []).join(" ")} ${(lead.needs ?? []).join(" ")}`.toLowerCase();
@@ -134,14 +139,22 @@ function filterLeads(
   });
 }
 
+function leadDistanceKm(lead: Lead): number {
+  return Number.parseFloat(lead.distance.replace(" km", "")) || 0;
+}
+
 function sortLeads(leads: Lead[], sortKey: SortKey): Lead[] {
   const copy = [...leads];
   if (sortKey === "match") return copy.sort((a, b) => b.match - a.match);
   if (sortKey === "distance") {
+    return copy.sort((a, b) => leadDistanceKm(a) - leadDistanceKm(b));
+  }
+  if (sortKey === "verified") {
     return copy.sort(
       (a, b) =>
-        (Number.parseFloat(a.distance.replace(" km", "")) || 0) -
-        (Number.parseFloat(b.distance.replace(" km", "")) || 0),
+        Number(b.verified) - Number(a.verified) ||
+        b.match - a.match ||
+        leadDistanceKm(a) - leadDistanceKm(b),
     );
   }
   return copy.sort((a, b) => a.name.localeCompare(b.name, "ro"));
@@ -198,12 +211,15 @@ export function DirectorPage({
   venueProducerScope = "matched",
   onVenueProducerScopeChange,
   onSearchMore,
+  searchMoreLabel,
   onUpgrade,
   onDetails,
   onMessage,
   onStatus,
   onWhatsAppClick,
   onFailedClick,
+  matchDiagnostics,
+  matchProductLabel,
 }: {
   leads: Lead[];
   statuses: Record<string, LeadStatus>;
@@ -218,12 +234,15 @@ export function DirectorPage({
   venueProducerScope?: "matched" | "all";
   onVenueProducerScopeChange?: (scope: "matched" | "all") => void;
   onSearchMore?: () => void;
+  searchMoreLabel?: string;
   onUpgrade: () => void;
   onDetails: (lead: Lead) => void;
   onMessage: (lead: Lead) => void;
   onStatus: (lead: Lead, status: LeadStatus) => void;
   onWhatsAppClick: (lead: Lead) => void;
   onFailedClick: (lead: Lead) => void;
+  matchDiagnostics?: VenueMatchDiagnostics;
+  matchProductLabel?: string;
 }) {
   const [distanceFilter, setDistanceFilter] = useState<DistanceFilter>("all");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
@@ -233,6 +252,7 @@ export function DirectorPage({
   const [sortKey, setSortKey] = useState<SortKey>("match");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [rangeFilter, setRangeFilter] = useState<RangeFilter>("all");
+  const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
   const [isWideLayout, setIsWideLayout] = useState(
     () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
   );
@@ -255,10 +275,19 @@ export function DirectorPage({
 
   const filteredLeads = useMemo(
     () => sortLeads(
-      filterLeads(leads, distanceFilter, typeFilter, productFilter, statusFilter, statuses, rangeFilter),
+      filterLeads(
+        leads,
+        distanceFilter,
+        typeFilter,
+        productFilter,
+        statusFilter,
+        statuses,
+        rangeFilter,
+        isVenue ? verifiedFilter : "all",
+      ),
       sortKey,
     ),
-    [leads, distanceFilter, typeFilter, productFilter, statusFilter, statuses, rangeFilter, sortKey],
+    [leads, distanceFilter, typeFilter, productFilter, statusFilter, statuses, rangeFilter, verifiedFilter, isVenue, sortKey],
   );
 
   const activeLimit = plan?.limits.activeLeads ?? activeLeadCount;
@@ -268,6 +297,7 @@ export function DirectorPage({
     (productFilter ? 1 : 0) +
     (statusFilter !== "all" ? 1 : 0) +
     (isVenue && rangeFilter !== "all" ? 1 : 0) +
+    (isVenue && verifiedFilter !== "all" ? 1 : 0) +
     (sortKey !== "match" ? 1 : 0);
 
   const resetFilters = () => {
@@ -277,7 +307,10 @@ export function DirectorPage({
     setSortKey("match");
     setStatusFilter("all");
     setRangeFilter("all");
+    setVerifiedFilter("all");
   };
+
+  const showMatchDiagnostics = isVenue && leads.length === 0 && matchDiagnostics;
 
   return (
     <aside className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#fbf7ed]">
@@ -299,8 +332,8 @@ export function DirectorPage({
             </p>
           </div>
           <Badge variant="warm" className="shrink-0">
-            {activeLeadCount}
-            {!isVenue && plan ? `/${activeLimit}` : ""} {isVenue ? "activi" : "active"}
+            {isVenue ? leads.length : activeLeadCount}
+            {!isVenue && plan ? `/${activeLimit}` : ""} {isVenue ? "potriviți" : "active"}
           </Badge>
         </div>
 
@@ -347,7 +380,7 @@ export function DirectorPage({
                 <Search className="h-3.5 w-3.5 lg:mr-1.5" />
               )}
               <span className="hidden lg:inline">
-                {isVenue ? "Vezi toți producătorii" : "Caută alte lead-uri"}
+                {searchMoreLabel ?? (isVenue ? "Vezi toți producătorii" : "Caută alte lead-uri")}
               </span>
             </Button>
           ) : null}
@@ -402,6 +435,7 @@ export function DirectorPage({
                 ["match", "Potrivire"],
                 ["distance", "Distanță"],
                 ["name", "Nume"],
+                ...(isVenue ? [["verified", "Verificați"] as [SortKey, string]] : []),
               ] as Array<[SortKey, string]>).map(([value, label]) => (
                 <FilterChip key={value} active={sortKey === value} label={label} onClick={() => setSortKey(value)} />
               ))}
@@ -419,10 +453,20 @@ export function DirectorPage({
             </FilterSection>
 
             {isVenue ? (
-              <FilterSection label="Livrare">
-                <FilterChip active={rangeFilter === "all"} label="Toată raza" onClick={() => setRangeFilter("all")} />
-                <FilterChip active={rangeFilter === "inRange"} label="Livrare la mine" onClick={() => setRangeFilter("inRange")} />
-              </FilterSection>
+              <>
+                <FilterSection label="Verificat">
+                  <FilterChip active={verifiedFilter === "all"} label="Toți" onClick={() => setVerifiedFilter("all")} />
+                  <FilterChip
+                    active={verifiedFilter === "verifiedOnly"}
+                    label="Doar verificați"
+                    onClick={() => setVerifiedFilter("verifiedOnly")}
+                  />
+                </FilterSection>
+                <FilterSection label="Livrare">
+                  <FilterChip active={rangeFilter === "all"} label="Toată raza" onClick={() => setRangeFilter("all")} />
+                  <FilterChip active={rangeFilter === "inRange"} label="Livrare la mine" onClick={() => setRangeFilter("inRange")} />
+                </FilterSection>
+              </>
             ) : null}
 
             {activeFilterCount > 0 ? (
@@ -437,6 +481,17 @@ export function DirectorPage({
           </div>
         </div>
       </div>
+
+      {showMatchDiagnostics ? (
+        <div className="shrink-0 px-3 py-2 lg:px-4">
+          <VenueMatchDiagnosticsPanel
+            diagnostics={matchDiagnostics}
+            productLabel={matchProductLabel}
+            scope={venueProducerScope}
+            onShowAll={onSearchMore}
+          />
+        </div>
+      ) : null}
 
       <MobileViewToggle
         panel={mobilePanel}

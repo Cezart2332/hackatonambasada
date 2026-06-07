@@ -213,13 +213,14 @@ export function matchProducersForVenue(params: {
       const keywordScore = keywordBoost(productsNeeded, producer.products);
       const proximityBonus =
         scope === "all" ? 0 : distanceKm <= 20 ? 5 : distanceKm <= 35 ? 2 : 0;
+      const verifiedBonus = producer.verified ? 4 : 0;
 
       const match =
         scope === "all"
-          ? Math.max(35, Math.min(99, (productNames ? 50 : 40) + keywordScore + proximityBonus))
+          ? Math.max(35, Math.min(99, (productNames ? 50 : 40) + keywordScore + proximityBonus + verifiedBonus))
           : needSpecified
-            ? Math.max(MIN_MATCHED_SCORE, Math.min(99, 42 + keywordScore * 2 + proximityBonus))
-            : Math.max(MIN_MATCHED_SCORE, Math.min(99, 55 + keywordScore + proximityBonus));
+            ? Math.max(MIN_MATCHED_SCORE, Math.min(99, 42 + keywordScore * 2 + proximityBonus + verifiedBonus))
+            : Math.max(MIN_MATCHED_SCORE, Math.min(99, 55 + keywordScore + proximityBonus + verifiedBonus));
 
       if (scope === "matched" && needSpecified && keywordScore === 0) return null;
       if (scope === "matched" && match < MIN_MATCHED_SCORE) return null;

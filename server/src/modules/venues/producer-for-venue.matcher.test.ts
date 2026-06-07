@@ -92,6 +92,25 @@ describe("producer-for-venue.matcher", () => {
     expect(result[0]?.matchFactors.inRange).toBe(true);
   });
 
+  it("boosts match score for verified producers", () => {
+    const verified = matchProducersForVenue({
+      producers: [baseProducer({ verified: true })],
+      venueLatitude: 44.17,
+      venueLongitude: 28.63,
+      productsNeeded: "miere",
+      scope: "matched",
+    });
+    const unverified = matchProducersForVenue({
+      producers: [baseProducer({ verified: false })],
+      venueLatitude: 44.17,
+      venueLongitude: 28.63,
+      productsNeeded: "miere",
+      scope: "matched",
+    });
+    expect(verified[0]?.match).toBeGreaterThan(unverified[0]?.match ?? 0);
+    expect((verified[0]?.match ?? 0) - (unverified[0]?.match ?? 0)).toBe(4);
+  });
+
   it("passes curated verified flag from producer profile", () => {
     const verified = matchProducersForVenue({
       producers: [baseProducer({ verified: true })],

@@ -1,5 +1,6 @@
 import React, { useState, type FormEvent } from "react";
 import {
+  ArrowLeft,
   Mail,
   LockKeyhole,
   Loader2,
@@ -22,11 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { normalizeAvailableFrom } from "@/lib/availableFrom";
+import { parseRangeKm } from "@/lib/api";
 import { messageFromUnknownError } from "@/lib/errors";
 import { AgentAvatar } from "@/components/AgentAvatar";
 import { LocationSearch } from "@/components/LocationSearch";
 import { ProductEditorCard, createProduct, patchProducerProduct } from "@/components/ProductEditor";
-import { SectionLabel, FieldBlock, RangeKmInput } from "@/components/FormBlocks";
+import { SectionLabel, FieldBlock, QuickChoiceRow, RangeKmInput } from "@/components/FormBlocks";
 import type {
   AccountType,
   ProducerSetup,
@@ -51,6 +53,15 @@ const venueTypeOptions: Array<{ value: VenueType; label: string }> = [
 
 const selectClassName =
   "flex h-11 w-full rounded-full border border-input bg-card px-4 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 10;
+}
 
 function ProducerWhatsAppNotice({ compact = false }: { compact?: boolean }) {
   return (
@@ -112,6 +123,47 @@ export function AuthScreen({
     phone: "",
     location: "",
   });
+  const [producerRegisterStep, setProducerRegisterStep] = useState<1 | 2>(1);
+
+  function resetProducerRegisterStep() {
+    setProducerRegisterStep(1);
+  }
+
+  function validateProducerRegisterStep1(): string | null {
+    if (registerName.trim().length < 2) return "Introdu numele tău (minim 2 caractere).";
+    const email = registerEmail.trim();
+    if (!email) return "Introdu un email valid.";
+    if (!isValidEmail(email)) return "Adresa de email nu pare validă.";
+    if (registerPassword.length < 8) return "Parola trebuie să aibă cel puțin 8 caractere.";
+    if (registerSetup.businessName.trim().length < 2) {
+      return "Introdu numele fermei sau gospodăriei (minim 2 caractere).";
+    }
+    if (!isValidPhone(registerSetup.phone)) {
+      return "Introdu un număr de WhatsApp valid (minim 10 cifre).";
+    }
+    return null;
+  }
+
+  function validateProducerRegisterStep2(): string | null {
+    const namedProducts = registerSetup.products.filter((product) => product.name.trim().length >= 2);
+    if (!namedProducts.length) return "Adaugă cel puțin un produs cu nume (minim 2 caractere).";
+    if (!registerSetup.location.trim()) return "Alege localitatea din listă.";
+    if (!registerSetup.locationChoice?.lat || !registerSetup.locationChoice?.lon) {
+      return "Selectează localitatea din sugestiile de căutare (nu doar text liber).";
+    }
+    if (parseRangeKm(registerSetup.range) <= 0) return "Aria de livrare trebuie să fie mai mare decât 0 km.";
+    return null;
+  }
+
+  function continueProducerRegister() {
+    const error = validateProducerRegisterStep1();
+    if (error) {
+      setAuthError(error);
+      return;
+    }
+    setAuthError(null);
+    setProducerRegisterStep(2);
+  }
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -179,8 +231,14 @@ export function AuthScreen({
 
   async function submitRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setAuthLoading(true);
     setAuthError(null);
+
+    if (isProducerRegister && producerRegisterStep === 1) {
+      continueProducerRegister();
+      return;
+    }
+
+    setAuthLoading(true);
 
     const email = registerEmail.trim();
     if (!email) {
@@ -191,7 +249,23 @@ export function AuthScreen({
 
     try {
       if (registerAccountType === "producer") {
-        const cleanProducts = registerSetup.products.map((product) =>
+        const step1Error = validateProducerRegisterStep1();
+        if (step1Error) {
+          setAuthError(step1Error);
+          setProducerRegisterStep(1);
+          setAuthLoading(false);
+          return;
+        }
+        const step2Error = validateProducerRegisterStep2();
+        if (step2Error) {
+          setAuthError(step2Error);
+          setAuthLoading(false);
+          return;
+        }
+
+        const cleanProducts = registerSetup.products
+          .filter((product) => product.name.trim().length >= 2)
+          .map((product) =>
           patchProducerProduct(
             {
               ...product,
@@ -202,7 +276,7 @@ export function AuthScreen({
             },
             {},
           ),
-        );
+          );
 
         const setup: ProducerSetup = {
           ...registerSetup,
@@ -273,7 +347,14 @@ export function AuthScreen({
                   {authError}
                 </p>
               ) : null}
-              <Tabs value={authMode} onValueChange={(value) => setAuthMode(value as "login" | "register")}>
+              <Tabs
+                value={authMode}
+                onValueChange={(value) => {
+                  setAuthMode(value as "login" | "register");
+                  resetProducerRegisterStep();
+                  setAuthError(null);
+                }}
+              >
                 <TabsList className="grid w-full grid-cols-2">
                   <TabsTrigger value="login">Login</TabsTrigger>
                   <TabsTrigger value="register">Register</TabsTrigger>
@@ -433,7 +514,11 @@ export function AuthScreen({
                         <button
                           key={option.value}
                           type="button"
-                          onClick={() => setRegisterAccountType(option.value)}
+                          onClick={() => {
+                            setRegisterAccountType(option.value);
+                            resetProducerRegisterStep();
+                            setAuthError(null);
+                          }}
                           className={cn(
                             "flex items-center justify-center gap-2 rounded-full border px-4 py-2.5 text-sm font-bold transition-colors",
                             registerAccountType === option.value
@@ -447,89 +532,114 @@ export function AuthScreen({
                       ))}
                     </div>
                   </div>
+                  {isProducerRegister ? (
+                    <Badge variant="olive" className="mb-4">
+                      Pasul {producerRegisterStep} din 2
+                    </Badge>
+                  ) : null}
                   <form onSubmit={submitRegister} className="space-y-6">
-                    <section className="space-y-4">
-                      <SectionLabel eyebrow="1" title="Date de autentificare" />
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <FieldBlock label="Numele tău">
-                          <div className="relative">
-                            <UserRound className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                              value={registerName}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                setRegisterName(value);
-                                if (isProducerRegister) {
-                                  setRegisterSetup((current) => ({ ...current, producerName: value }));
-                                } else {
-                                  setVenueSetup((current) => ({ ...current, contactName: value }));
-                                }
-                              }}
-                              className="pl-11"
-                              placeholder={isProducerRegister ? "Ex: Ana Popescu" : "Ex: Mihai Ionescu"}
-                            />
-                          </div>
-                        </FieldBlock>
-                        <FieldBlock label="Email">
-                          <div className="relative">
-                            <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                              value={registerEmail}
-                              onChange={(event) => setRegisterEmail(event.target.value)}
-                              type="email"
-                              className="pl-11"
-                              placeholder={isProducerRegister ? "nume@ferma.ro" : "contact@restaurant.ro"}
-                            />
-                          </div>
-                        </FieldBlock>
-                        <FieldBlock label="Parolă">
-                          <div className="relative">
-                            <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                              value={registerPassword}
-                              onChange={(event) => setRegisterPassword(event.target.value)}
-                              type="password"
-                              className="pl-11"
-                              placeholder="Alege o parolă"
-                            />
-                          </div>
-                        </FieldBlock>
-                      </div>
-                    </section>
+                    {isProducerRegister && producerRegisterStep === 2 ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="-ml-2 mb-2"
+                        onClick={() => {
+                          setProducerRegisterStep(1);
+                          setAuthError(null);
+                        }}
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        Înapoi
+                      </Button>
+                    ) : null}
 
-                    {isProducerRegister ? (
+                    {(isProducerRegister && producerRegisterStep === 1) || !isProducerRegister ? (
+                      <section className="space-y-4">
+                        <SectionLabel eyebrow="1" title="Date de autentificare" />
+                        <div className="grid gap-4 md:grid-cols-3">
+                          <FieldBlock label="Numele tău">
+                            <div className="relative">
+                              <UserRound className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                value={registerName}
+                                onChange={(event) => {
+                                  const value = event.target.value;
+                                  setRegisterName(value);
+                                  if (isProducerRegister) {
+                                    setRegisterSetup((current) => ({ ...current, producerName: value }));
+                                  } else {
+                                    setVenueSetup((current) => ({ ...current, contactName: value }));
+                                  }
+                                }}
+                                className="pl-11"
+                                placeholder={isProducerRegister ? "Ex: Ana Popescu" : "Ex: Mihai Ionescu"}
+                              />
+                            </div>
+                          </FieldBlock>
+                          <FieldBlock label="Email">
+                            <div className="relative">
+                              <Mail className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                value={registerEmail}
+                                onChange={(event) => setRegisterEmail(event.target.value)}
+                                type="email"
+                                className="pl-11"
+                                placeholder={isProducerRegister ? "nume@ferma.ro" : "contact@restaurant.ro"}
+                              />
+                            </div>
+                          </FieldBlock>
+                          <FieldBlock label="Parolă">
+                            <div className="relative">
+                              <LockKeyhole className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                value={registerPassword}
+                                onChange={(event) => setRegisterPassword(event.target.value)}
+                                type="password"
+                                className="pl-11"
+                                placeholder="Alege o parolă"
+                              />
+                            </div>
+                          </FieldBlock>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {isProducerRegister && producerRegisterStep === 1 ? (
+                      <section className="space-y-4">
+                        <SectionLabel eyebrow="2" title="Producător" />
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <FieldBlock label="Numele fermei sau gospodăriei">
+                            <div className="relative">
+                              <Home className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                value={registerSetup.businessName}
+                                onChange={(event) => updateRegisterSetup("businessName", event.target.value)}
+                                className="pl-11"
+                                placeholder="Ex: Stupina de la Murfatlar"
+                              />
+                            </div>
+                          </FieldBlock>
+                          <FieldBlock label="Telefon WhatsApp">
+                            <div className="relative">
+                              <Phone className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                value={registerSetup.phone}
+                                onChange={(event) => updateRegisterSetup("phone", event.target.value)}
+                                className="pl-11"
+                                placeholder="Ex: 07xx xxx xxx"
+                              />
+                            </div>
+                          </FieldBlock>
+                        </div>
+                      </section>
+                    ) : null}
+
+                    {isProducerRegister && producerRegisterStep === 2 ? (
                       <>
-                        <section className="space-y-4">
-                          <SectionLabel eyebrow="2" title="Producător" />
-                          <div className="grid gap-4 md:grid-cols-2">
-                            <FieldBlock label="Numele fermei sau gospodăriei">
-                              <div className="relative">
-                                <Home className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                <Input
-                                  value={registerSetup.businessName}
-                                  onChange={(event) => updateRegisterSetup("businessName", event.target.value)}
-                                  className="pl-11"
-                                  placeholder="Ex: Stupina de la Murfatlar"
-                                />
-                              </div>
-                            </FieldBlock>
-                            <FieldBlock label="Telefon WhatsApp">
-                              <div className="relative">
-                                <Phone className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                <Input
-                                  value={registerSetup.phone}
-                                  onChange={(event) => updateRegisterSetup("phone", event.target.value)}
-                                  className="pl-11"
-                                  placeholder="Ex: 07xx xxx xxx"
-                                />
-                              </div>
-                            </FieldBlock>
-                          </div>
-                        </section>
-
                         <section className="space-y-3">
                           <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-                            <SectionLabel eyebrow="3" title="Ce vinzi" />
+                            <SectionLabel eyebrow="1" title="Ce vinzi" />
                             <Button type="button" variant="outline" size="sm" onClick={addRegisterProduct}>
                               <Plus className="h-4 w-4" />
                               Adaugă produs
@@ -551,7 +661,7 @@ export function AuthScreen({
                         </section>
 
                         <section className="space-y-4">
-                          <SectionLabel eyebrow="4" title="Livrare" />
+                          <SectionLabel eyebrow="2" title="Livrare" />
                           <div className="grid gap-4 md:grid-cols-2">
                             <FieldBlock label="Localitate">
                               <LocationSearch
@@ -566,6 +676,10 @@ export function AuthScreen({
                                   value={registerSetup.range}
                                   onChange={(value) => updateRegisterSetup("range", value)}
                                 />
+                                <QuickChoiceRow
+                                  choices={["20 km", "35 km", "60 km"]}
+                                  onChoose={(choice) => updateRegisterSetup("range", choice)}
+                                />
                               </FieldBlock>
                               <FieldBlock label="Zile bune de livrare">
                                 <Input
@@ -579,7 +693,7 @@ export function AuthScreen({
                         </section>
 
                         <section className="space-y-4">
-                          <SectionLabel eyebrow="5" title="Detalii suplimentare" />
+                          <SectionLabel eyebrow="3" title="Detalii suplimentare" />
                           <FieldBlock label="Povestea ta, produsul și cum este produs (opțional)">
                             <div className="relative">
                               <ScrollText className="pointer-events-none absolute left-4 top-4 h-4 w-4 text-muted-foreground" />
@@ -593,7 +707,7 @@ export function AuthScreen({
                           </FieldBlock>
                         </section>
                       </>
-                    ) : (
+                    ) : !isProducerRegister ? (
                       <>
                         <section className="space-y-4">
                           <SectionLabel eyebrow="2" title="Localul tău" />
@@ -647,18 +761,24 @@ export function AuthScreen({
                           După înregistrare, spui în Chat ce produse cauți — acolo actualizezi nevoile și vezi producătorii potriviți.
                         </p>
                       </>
+                    ) : null}
+
+                    {isProducerRegister && producerRegisterStep === 2 ? <ProducerWhatsAppNotice compact /> : null}
+
+                    {isProducerRegister && producerRegisterStep === 1 ? (
+                      <Button type="button" variant="honey" className="w-full" onClick={continueProducerRegister}>
+                        Continuă
+                      </Button>
+                    ) : (
+                      <Button type="submit" variant="honey" className="w-full" disabled={authLoading}>
+                        {authLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                        {authLoading
+                          ? "Se creează contul..."
+                          : isProducerRegister
+                            ? "Creează cont de producător"
+                            : "Creează cont de local"}
+                      </Button>
                     )}
-
-                    {isProducerRegister ? <ProducerWhatsAppNotice compact /> : null}
-
-                    <Button type="submit" variant="honey" className="w-full" disabled={authLoading}>
-                      {authLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      {authLoading
-                        ? "Se creează contul..."
-                        : isProducerRegister
-                          ? "Creează cont de producător"
-                          : "Creează cont de local"}
-                    </Button>
                   </form>
                 </TabsContent>
               </Tabs>

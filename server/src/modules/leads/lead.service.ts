@@ -178,6 +178,31 @@ export async function listLeadsForUser(userId: string, accountType?: string) {
       lead.status,
     ),
   );
+  const products = profile.products.map((p) => p.name).filter(Boolean);
+  const aiListed = await listDiscoveredLeads(userId, latitude, longitude, products);
+  if (aiListed?.length) {
+    return aiListed.map((lead) =>
+      mapLeadForPlan(
+        {
+          ...mapDiscoveredLeadToDto(lead),
+          status: lead.status ?? null,
+        },
+        plan.tier,
+        lead.status,
+      ),
+    );
+  }
+
+  try {
+    const discovered = await matchForUser(userId, {}, accountType);
+    if (discovered?.length) {
+      return discovered.map((lead) => ({ ...lead, status: null }));
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
 }
 
 export async function getLeadById(userId: string, leadId: string, accountType?: string) {
@@ -185,10 +210,12 @@ export async function getLeadById(userId: string, leadId: string, accountType?: 
     const profile = await getProfileContext(userId);
     const plan = await getPlanContext(userId, accountType);
     const { latitude, longitude } = await resolveProfileCoordinates(profile);
+    const products = profile.products.map((p) => p.name).filter(Boolean);
     const listed = await listDiscoveredLeads(
       userId,
       latitude,
       longitude,
+      products,
     );
     const found = listed?.find((l) => l.id === leadId);
     if (found) {

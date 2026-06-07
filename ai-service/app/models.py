@@ -174,6 +174,7 @@ class ListDiscoveredRequest(BaseModel):
     userId: str
     latitude: float = 44.17
     longitude: float = 28.63
+    products: list[Any] = Field(default_factory=list)
 
 
 class BuyerStatusRequest(BaseModel):

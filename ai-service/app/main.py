@@ -233,7 +233,7 @@ def leads_discover(body: DiscoverLeadsRequest) -> DiscoverLeadsResponse:
 
 @app.post("/v1/leads/list", response_model=DiscoverLeadsResponse)
 def leads_list(body: ListDiscoveredRequest) -> DiscoverLeadsResponse:
-    leads = list_discovered_leads(body.userId, body.latitude, body.longitude)
+    leads = list_discovered_leads(body.userId, body.latitude, body.longitude, products=body.products)
     return DiscoverLeadsResponse(
         leads=[DiscoveredLead(**lead) for lead in leads],
         areaKey="",

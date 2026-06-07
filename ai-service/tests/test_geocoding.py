@@ -9,13 +9,27 @@ from app import db, geocode
 from app.agent import discovery_graph
 from app.gemini import BuyerDraft, _parse_buyer_item
 from app.geocode import GeocodeResult
-from app.services import discovery
+from app.services import compatibility, discovery
+from app.services.compatibility import buyer_is_compatible_with_producer
 
 
 class GeocodingTests(unittest.TestCase):
     def setUp(self) -> None:
         geocode._geocode_success_cache.clear()
         geocode._nominatim_blocked_until = 0.0
+        compatibility._compatibility_cache.clear()
+        self._compat_settings_active = True
+        self._compat_settings_patcher = patch(
+            "app.services.compatibility.get_settings",
+            return_value=SimpleNamespace(llm_enabled=False),
+        )
+        self._compat_settings_patcher.start()
+        self.addCleanup(self._stop_compat_settings_patch)
+
+    def _stop_compat_settings_patch(self) -> None:
+        if getattr(self, "_compat_settings_active", False):
+            self._compat_settings_patcher.stop()
+            self._compat_settings_active = False
 
     def test_full_address_query_is_sent_before_name_only_fallback(self) -> None:
         calls: list[str] = []
@@ -343,6 +357,82 @@ class GeocodingTests(unittest.TestCase):
             discovery_graph.route_after_validate({**state, "attempts": discovery_graph.MAX_ATTEMPTS}),
             "end",
         )
+
+    def test_carmangerie_is_not_compatible_with_vegetable_producer_when_ai_unavailable(self) -> None:
+        self.assertFalse(
+            buyer_is_compatible_with_producer(
+                name="Carmangeria Dobrogea",
+                business_type="magazin alimentar",
+                producer_needs=["vegetables", "fruit"],
+                buyer_needs=["vegetables"],
+                summary="Carmangerie și mezelărie locală.",
+            )
+        )
+
+    def test_carmangerie_is_compatible_with_meat_producer_when_ai_unavailable(self) -> None:
+        self.assertTrue(
+            buyer_is_compatible_with_producer(
+                name="Carmangeria Dobrogea",
+                business_type="carmangerie",
+                producer_needs=["meat"],
+                buyer_needs=["meat"],
+                summary="Magazin specializat în carne.",
+            )
+        )
+
+    def test_ai_compatibility_decision_overrides_fallback(self) -> None:
+        self._stop_compat_settings_patch()
+        fake_response = SimpleNamespace(text='{"compatible": false, "reason": "local vegan"}')
+
+        with (
+            patch("app.services.compatibility.get_settings", return_value=SimpleNamespace(llm_enabled=True)),
+            patch("app.services.compatibility.chat_with_web", return_value=fake_response) as chat,
+        ):
+            self.assertFalse(
+                buyer_is_compatible_with_producer(
+                    name="Restaurant Verde",
+                    business_type="restaurant",
+                    producer_needs=["meat"],
+                    buyer_needs=["meat"],
+                    summary="Restaurant generalist cu meniu mixt.",
+                )
+            )
+
+        chat.assert_called_once()
+
+    def test_discovery_graph_skips_carmangerie_for_vegetable_producer(self) -> None:
+        item = {
+            "name": "Carmangeria Dobrogea",
+            "type": "magazin alimentar",
+            "city": "Constanța",
+            "address": "Bulevardul Tomis 100, Constanța, România",
+            "needs": ["vegetables"],
+            "summary": "Magazin axat pe carne.",
+        }
+        state = {
+            "locality": "Constanța",
+            "latitude": 44.17,
+            "longitude": 28.63,
+            "range_km": 35.0,
+            "producer_needs": ["vegetables", "fruit"],
+            "exclude_names": [],
+            "avoid_labels": [],
+            "target_count": 3,
+            "attempts": 1,
+            "research_text": json.dumps([item]),
+            "citations": [],
+            "validated": [],
+            "seen_names": [],
+        }
+
+        with (
+            patch("app.agent.discovery_graph.buyer_is_compatible_with_producer", return_value=False),
+            patch("app.agent.discovery_graph.geocode_business") as geocode_business,
+        ):
+            result = discovery_graph.extract_validate_node(state)
+
+        self.assertEqual(result["validated"], [])
+        geocode_business.assert_not_called()
 
     def test_verified_geocode_metadata_is_passed_to_upsert(self) -> None:
         draft = BuyerDraft(

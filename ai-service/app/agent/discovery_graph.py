@@ -21,6 +21,7 @@ from app.gemini import (
 from app.geocode import geocode_business, geocode_city_center, haversine_km, infer_city_from_address
 from app.openrouter_client import chat_with_web
 from app.phone_util import validate_phone
+from app.services.compatibility import buyer_is_compatible_with_producer
 from app.taxonomy import needs_to_text
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,8 @@ SEARCH_CATEGORIES: list[SearchCategory] = [
     },
     {
         "label": "MAGAZINE ALIMENTARE",
-        "accepted": "magazine alimentare, băcănii, delicaterii, magazine gourmet, magazine bio, carmangerii, supermarketuri locale",
-        "rejected": "piețe publice, târguri, hale agroalimentare, anunțuri, agregatoare și directoare comerciale",
+        "accepted": "magazine alimentare, băcănii, delicaterii, magazine gourmet, magazine bio, carmangerii/măcelării, supermarketuri locale",
+        "rejected": "piețe publice, târguri, hale agroalimentare, carmangerii/măcelării incompatibile cu produsele producătorului, anunțuri, agregatoare și directoare comerciale",
         "evidence": "site oficial sau pagină oficială social media pentru magazinul respectiv, cu adresă publică",
     },
 ]
@@ -140,6 +141,12 @@ def search_node(state: DiscoveryState) -> dict:
         if avoid
         else "(niciuna)"
     )
+    compatibility_note = (
+        "FILTRU DE COMPATIBILITATE: include doar venue-uri care ar cumpăra realist produsele producătorului. "
+        "Exemple: carne/pui -> exclude localuri vegane/plant-based sau care caută doar legume/fructe; "
+        "brânză/lactate -> exclude carmangerii/măcelării și magazine axate pe legume/fructe dacă nu există semnal clar de lactate; "
+        "legume/fructe/ierburi -> exclude carmangerii/măcelării/mezelării, dar păstrează restaurante/hoteluri/cafenele mixte cu meniu relevant.\n"
+    )
 
     remaining = max(1, state["target_count"] - len(state.get("validated") or []))
     remaining_categories = max(1, MAX_ATTEMPTS - attempts + 1)
@@ -156,6 +163,7 @@ def search_node(state: DiscoveryState) -> dict:
         f"Producătorul vinde: {needs_label}.\n\n"
         f"NU include aceste afaceri deja găsite:\n{exclude_block}\n\n"
         f"EVITĂ tipuri/motive respinse anterior de producător:\n{avoid_block}\n\n"
+        f"{compatibility_note}"
         f"Include DOAR venue-uri cumpărătoare reale din categoria {category['label']}.\n"
         "EXCLUDE complet piețe/târguri/hale publice, articole de presă, ghiduri turistice, directoare/listări ca linkuri finale, "
         "pagini de eveniment sau mențiuni fără adresă reală. Poți folosi Google Maps pentru adresă/validare.\n"
@@ -204,6 +212,17 @@ def extract_validate_node(state: DiscoveryState) -> dict:
 
         if _address_needs_enrichment(draft.address, state["locality"]):
             _enrich_buyer_details(draft, state["locality"])
+        if not buyer_is_compatible_with_producer(
+            name=draft.name,
+            business_type=draft.type,
+            producer_needs=state["producer_needs"],
+            buyer_needs=draft.needs,
+            summary=draft.summary,
+            menu_items=draft.menu_items,
+            notes=draft.notes,
+        ):
+            logger.warning("Graph skip %s — incompatible with producer products", draft.name)
+            continue
 
         city = draft.city or infer_city_from_address(draft.address) or state["locality"]
         geo = geocode_business(
@@ -314,4 +333,19 @@ def run_discovery_graph(
             if menu:
                 draft.menu_items = menu
 
-    return drafts[:target_count]
+    compatible: list[BuyerDraft] = []
+    for draft in drafts:
+        if buyer_is_compatible_with_producer(
+            name=draft.name,
+            business_type=draft.type,
+            producer_needs=producer_needs,
+            buyer_needs=draft.needs,
+            summary=draft.summary,
+            menu_items=draft.menu_items,
+            notes=draft.notes,
+        ):
+            compatible.append(draft)
+        else:
+            logger.warning("Graph drop %s after enrichment — incompatible with producer products", draft.name)
+
+    return compatible[:target_count]

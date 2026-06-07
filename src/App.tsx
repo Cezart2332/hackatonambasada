@@ -225,7 +225,15 @@ function profileToChatSnapshot(profile: Profile) {
   return {
     product: profile.product || summary.product,
     quantity: profile.quantity || summary.quantity,
-    products: (profile.products ?? []).map((p) => p.name.trim()).filter(Boolean),
+    products: (profile.products ?? [])
+      .filter((p) => p.name.trim())
+      .map((p) => ({
+        name: p.name.trim(),
+        estimatedQuantity: p.estimatedQuantity,
+        unit: p.unit,
+        pricePerKg: p.pricePerKg,
+        availableFrom: p.availableFrom,
+      })),
     location: profile.location ?? "",
     latitude: profile.locationChoice?.lat ? Number.parseFloat(profile.locationChoice.lat) : null,
     longitude: profile.locationChoice?.lon ? Number.parseFloat(profile.locationChoice.lon) : null,
@@ -248,9 +256,39 @@ function mergeAgentProfileUpdates(current: Profile, updates: Record<string, unkn
   if (typeof updates.deliveryDays === "string") next.days = updates.deliveryDays;
   if (typeof updates.preferredDays === "string") next.days = updates.preferredDays;
   if (Array.isArray(updates.products) && updates.products.length) {
-    const names = updates.products.map(String).filter(Boolean);
-    next.products = names.map((name) => createProduct({ name }));
+    const products = updates.products
+      .map((item) => {
+        if (typeof item === "string") {
+          return createProduct({ name: item });
+        }
+        if (!item || typeof item !== "object") return null;
+        const product = item as Partial<ProducerProduct> & {
+          estimatedQuantity?: string;
+          pricePerKg?: string;
+          availableFrom?: string;
+          unit?: string;
+        };
+        if (!product.name?.trim()) return null;
+        return createProduct({
+          name: product.name,
+          estimatedQuantity: product.estimatedQuantity ?? "",
+          unit: product.unit ?? "kg",
+          pricePerKg: product.pricePerKg ?? "",
+          availableFrom: product.availableFrom ?? "Saptamana asta",
+        });
+      })
+      .filter((item): item is ProducerProduct => Boolean(item));
+    const names = products.map((product) => product.name).filter(Boolean);
+    next.products = products;
     next.product = names.join(", ");
+    const quantities = products
+      .map((product) =>
+        product.estimatedQuantity.trim()
+          ? `${product.estimatedQuantity.trim()} ${product.unit.trim() || "kg"}`
+          : "",
+      )
+      .filter(Boolean);
+    if (quantities.length) next.quantity = quantities.join("; ");
   }
   return next;
 }
@@ -563,7 +601,13 @@ function App() {
 
     setTyping(true);
     try {
-      const { reply, profileUpdates, leads: agentLeads, onboardingComplete } = await api.chatReply({
+      const {
+        reply,
+        profileUpdates,
+        profile: persistedProfile,
+        leads: agentLeads,
+        onboardingComplete,
+      } = await api.chatReply({
         userId,
         message: text,
         accountType: isVenue ? "venue" : "producer",
@@ -572,8 +616,14 @@ function App() {
           : profileToChatSnapshot(snapshot),
       });
 
-      let mergedProfile = snapshot;
-      if (profileUpdates && Object.keys(profileUpdates).length) {
+      let mergedProfile = persistedProfile
+        ? apiProfileToFrontend(persistedProfile, {
+            producerName: snapshot.producerName,
+            businessName: snapshot.businessName,
+            phone: snapshot.phone,
+          })
+        : snapshot;
+      if (!persistedProfile && profileUpdates && Object.keys(profileUpdates).length) {
         mergedProfile = mergeAgentProfileUpdates(snapshot, profileUpdates);
       }
 
@@ -676,7 +726,9 @@ function App() {
         return;
       }
 
-      if (profileUpdates && Object.keys(profileUpdates).length) {
+      if (persistedProfile) {
+        setProfile(mergedProfile);
+      } else if (profileUpdates && Object.keys(profileUpdates).length) {
         setProfile(mergedProfile);
         void api.updateProfile(setupToApiPayload(mergedProfile)).catch(() => undefined);
       }

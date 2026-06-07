@@ -6,6 +6,7 @@ from typing import Any
 from app import db
 from app.config import get_settings
 from app.gemini import embed
+from app.services.compatibility import buyer_is_compatible_with_producer
 from app.services.discovery import ensure_area_researched
 from app.taxonomy import normalize_producer_products, needs_to_text, overlap_score
 
@@ -156,7 +157,7 @@ def discover_leads(
                 longitude=longitude,
                 range_km=range_km,
                 exclude_ids=exclude,
-                limit=limit * 2,
+                limit=limit * 4,
             )
         except Exception as exc:
             logger.warning("Vector search failed: %s", exc)
@@ -174,7 +175,15 @@ def discover_leads(
             continue
         similarity = float(row.get("similarity") or 0.0)
         buyer_needs = list(row.get("needs") or [])
-        if producer_needs and not overlap_score(buyer_needs, producer_needs):
+        if not buyer_is_compatible_with_producer(
+            name=str(row.get("name") or ""),
+            business_type=str(row.get("type") or ""),
+            producer_needs=producer_needs,
+            buyer_needs=buyer_needs,
+            summary=str(row.get("summary") or ""),
+            menu_items=str(row.get("menu_items") or ""),
+            notes=str(row.get("notes") or ""),
+        ):
             continue
         leads.append(
             _build_lead_dto(
@@ -201,15 +210,33 @@ def discover_leads(
     }
 
 
-def list_discovered_leads(user_id: str, latitude: float, longitude: float) -> list[dict[str, Any]]:
+def list_discovered_leads(
+    user_id: str,
+    latitude: float,
+    longitude: float,
+    *,
+    products: list[str] | None = None,
+) -> list[dict[str, Any]]:
     rows = db.list_producer_buyers(user_id)
+    producer_needs = normalize_producer_products(products or [])
     leads: list[dict[str, Any]] = []
     for row in rows:
+        buyer_needs = list(row.get("needs") or [])
+        if not buyer_is_compatible_with_producer(
+            name=str(row.get("name") or ""),
+            business_type=str(row.get("type") or ""),
+            producer_needs=producer_needs or buyer_needs,
+            buyer_needs=buyer_needs,
+            summary=str(row.get("summary") or ""),
+            menu_items=str(row.get("menu_items") or ""),
+            notes=str(row.get("notes") or ""),
+        ):
+            continue
         lead = _build_lead_dto(
             row,
             latitude=latitude,
             longitude=longitude,
-            producer_needs=list(row.get("needs") or []),
+            producer_needs=producer_needs or buyer_needs,
         )
         api_status = _map_status_to_api(row.get("interaction_status"))
         if api_status:

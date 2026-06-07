@@ -411,7 +411,16 @@ export const api = {
     profile?: {
       product?: string;
       quantity?: string;
-      products?: string[];
+      products?: Array<
+        | string
+        | {
+            name: string;
+            estimatedQuantity?: string;
+            unit?: string;
+            pricePerKg?: string;
+            availableFrom?: string;
+          }
+      >;
       location?: string;
       latitude?: number | null;
       longitude?: number | null;
@@ -424,6 +433,7 @@ export const api = {
     apiFetch<{
       reply: string;
       profileUpdates?: Record<string, unknown>;
+      profile?: ApiProfile;
       leads?: Lead[];
       onboardingComplete?: boolean;
     }>("/api/ai/v1/chat/reply", {

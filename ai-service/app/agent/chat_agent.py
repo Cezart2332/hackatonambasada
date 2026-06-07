@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -24,11 +25,15 @@ Obiectiv:
 1. Află ce produse vinde producătorul, cantitatea disponibilă, localitatea, raza de livrare (km) și zilele preferate.
 2. Când profilul e suficient (produse + localitate + rază), apelează run_discovery pentru lead-uri reale.
 3. Răspunde la întrebări despre lead-uri, mesaje outreach (draft_message) sau căutări suplimentare.
+4. Când utilizatorul spune în limbaj natural că vinde altceva, schimbă cantități, prețuri, disponibilitate, rază, localitate sau zile de livrare, apelează tool-ul potrivit ca să actualizezi profilul.
 
 Reguli:
 - Vorbește română, cald, scurt (2–4 propoziții).
 - Pune câte o întrebare clară dacă lipsește ceva din profil.
 - Nu inventa afaceri — folosește run_discovery.
+- Nu spune că ai salvat ceva până nu ai apelat update_profile_field sau update_product_catalog.
+- Pentru produse folosește update_product_catalog când ai nume + cantitate/preț/disponibilitate sau când utilizatorul cere adăugare/ștergere/înlocuire produse.
+- update_product_catalog mode='merge' pentru „adaugă” sau „mai vând”, mode='replace' pentru „de acum vând doar”, mode='remove' pentru „scoate/nu mai vând”.
 - Dacă utilizatorul cere explicit „caută lead-uri”, „găsește clienți”, „caută restaurante/localuri” sau similar, tratează mesajul ca intenție de discovery și apelează run_discovery imediat când profilul are produse + localitate + rază.
 - După run_discovery, rezumă concret numele găsite și menționează că sunt venue-uri reale verificate.
 - Pentru „caută alte lead-uri” / „mai multe lead-uri” / „mai caută”, apelează run_discovery cu discover_more=true.
@@ -70,6 +75,38 @@ def _parse_range_km(value: str) -> float:
     if match:
         return float(match.group(1))
     return 35.0
+
+
+def _split_product_names(value: str) -> list[str]:
+    return [p.strip() for p in re.split(r"[,;]", value) if p.strip()]
+
+
+def _normalize_product_patch(item: Any) -> dict[str, str] | None:
+    if isinstance(item, str):
+        name = item.strip()
+        return {"name": name} if name else None
+    if not isinstance(item, dict):
+        return None
+
+    name = str(item.get("name") or item.get("product") or "").strip()
+    if not name:
+        return None
+
+    patch: dict[str, str] = {"name": name}
+    for source_key, target_key in (
+        ("estimatedQuantity", "estimatedQuantity"),
+        ("quantity", "estimatedQuantity"),
+        ("unit", "unit"),
+        ("pricePerKg", "pricePerKg"),
+        ("price", "pricePerKg"),
+        ("availableFrom", "availableFrom"),
+        ("availability", "availableFrom"),
+        ("action", "action"),
+    ):
+        value = item.get(source_key)
+        if value is not None and str(value).strip():
+            patch[target_key] = str(value).strip()
+    return patch
 
 
 def _profile_ready(profile: dict[str, Any]) -> bool:
@@ -152,9 +189,10 @@ def update_profile_field(field: str, value: str) -> str:
     updates: dict[str, Any] = {}
 
     if field in {"product", "products"}:
-        products = [p.strip() for p in re.split(r"[,;]", value) if p.strip()]
+        products = _split_product_names(value)
         updates["product"] = ", ".join(products)
-        updates["products"] = products
+        updates["products"] = [{"name": product} for product in products]
+        updates["productUpdateMode"] = "replace"
     elif field == "quantity":
         updates["quantity"] = value
     elif field == "location":
@@ -180,6 +218,80 @@ def update_profile_field(field: str, value: str) -> str:
         ctx.onboarding_complete = True
 
     return f"Am salvat {field}={value}."
+
+
+@tool
+def update_product_catalog(products_json: str, mode: str = "merge") -> str:
+    """Actualizează lista de produse vândute de producător.
+
+    products_json: JSON array. Fiecare element poate avea:
+      name, estimatedQuantity, unit, pricePerKg, availableFrom, action.
+      Exemplu: [{"name":"roșii","estimatedQuantity":"50","unit":"kg","pricePerKg":"8","availableFrom":"săptămâna asta"}]
+    mode: merge | replace | remove
+      merge = adaugă/actualizează produsele menționate fără să șteargă restul
+      replace = înlocuiește toată lista cu produsele menționate
+      remove = șterge produsele menționate
+    """
+    ctx = _ctx()
+    mode = (mode or "merge").strip().lower()
+    if mode not in {"merge", "replace", "remove"}:
+        mode = "merge"
+
+    try:
+        raw_items = json.loads(products_json)
+    except Exception:
+        raw_items = _split_product_names(products_json)
+
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    if not isinstance(raw_items, list):
+        return "Nu am putut interpreta produsele. Cere utilizatorului să le reformuleze."
+
+    products = [item for item in (_normalize_product_patch(raw) for raw in raw_items) if item]
+    if not products:
+        return "Nu am găsit niciun produs valid în mesaj."
+
+    updates: dict[str, Any] = {
+        "products": products,
+        "productUpdateMode": mode,
+    }
+    if mode != "remove":
+        updates["product"] = ", ".join(product["name"] for product in products)
+        quantities = [
+            f"{product.get('estimatedQuantity', '').strip()} {product.get('unit', '').strip() or 'kg'}".strip()
+            for product in products
+            if product.get("estimatedQuantity")
+        ]
+        if quantities:
+            updates["quantity"] = "; ".join(quantities)
+
+    ctx.profile_updates.update(updates)
+
+    current_products = ctx.profile.get("products") or []
+    if mode == "replace":
+        ctx.profile["products"] = products
+    elif mode == "remove":
+        remove_names = {product["name"].strip().lower() for product in products}
+        ctx.profile["products"] = [
+            product
+            for product in current_products
+            if str(product.get("name") if isinstance(product, dict) else product).strip().lower() not in remove_names
+        ]
+    else:
+        merged: list[Any] = list(current_products) if isinstance(current_products, list) else []
+        existing_names = {
+            str(product.get("name") if isinstance(product, dict) else product).strip().lower()
+            for product in merged
+        }
+        for product in products:
+            if product["name"].strip().lower() not in existing_names:
+                merged.append(product)
+        ctx.profile["products"] = merged
+
+    if _profile_ready(ctx.profile):
+        ctx.onboarding_complete = True
+
+    return f"Am pregătit actualizarea produselor ({mode}): {', '.join(p['name'] for p in products)}."
 
 
 @tool
@@ -285,7 +397,7 @@ def _get_agent():
         model = get_chat_model(temperature=0.3)
         _agent = create_react_agent(
             model,
-            [update_profile_field, run_discovery, draft_message],
+            [update_profile_field, update_product_catalog, run_discovery, draft_message],
             prompt=SYSTEM_PROMPT,
             checkpointer=_checkpointer,
         )
@@ -356,6 +468,7 @@ def run_chat_turn(
         if ctx.profile:
             profile_hint = (
                 f"produse={ctx.profile.get('product') or ctx.profile.get('products')}, "
+                f"cantități={ctx.profile.get('quantity')}, "
                 f"localitate={ctx.profile.get('location')}, "
                 f"rază={ctx.profile.get('range') or ctx.profile.get('rangeKm')}, "
                 f"zile={ctx.profile.get('days') or ctx.profile.get('deliveryDays')}"
